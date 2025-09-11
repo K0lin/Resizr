@@ -1,0 +1,957 @@
+openapi: 3.0.3
+
+info:
+  title: RESIZR - Image Processing API
+  description: |
+    **RESIZR** is a high-performance image processing service that provides RESTful APIs for image upload, processing, and delivery. 
+    
+    ## Features
+    - Multi-resolution image processing with smart-fit algorithm
+    - Support for JPEG, PNG, GIF, and WebP formats
+    - Redis-based metadata storage and caching
+    - S3-compatible storage backend
+    - Rate limiting and security features
+    
+    ## Authentication
+    Currently, no authentication is required. Future versions will support JWT bearer tokens.
+    
+    ## Rate Limits
+    - Upload: 10 requests/minute per IP
+    - Download: 100 requests/minute per IP
+    - Info: 50 requests/minute per IP
+    
+    ## CORS Support
+    Cross-Origin Resource Sharing (CORS) is configurable:
+    - Production: Restricted to configured allowed origins
+    - Development: Allows all origins for testing
+    - Configurable through environment variables
+    
+    ## Error Handling
+    All errors follow a consistent JSON format with appropriate HTTP status codes.
+    
+  version: 1.0.0
+  contact:
+    name: RESIZR API Support
+    email: support@resizr.dev
+    url: https://github.com/your-org/resizr
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.resizr.dev
+    description: Production server
+  - url: https://staging.resizr.dev
+    description: Staging server
+  - url: http://localhost:8080
+    description: Development server
+
+tags:
+  - name: Images
+    description: Image upload, processing, and delivery operations
+  - name: Health
+    description: Service health and monitoring endpoints
+
+paths:
+  /api/v1/images:
+    post:
+      tags:
+        - Images
+      summary: Upload image
+      description: |
+        Upload a new image file with optional custom resolution processing.
+        
+        The service will:
+        1. Validate the uploaded file (format, size, etc.)
+        2. Generate a unique UUID for the image
+        3. Process default resolutions (thumbnail, preview)
+        4. Process any requested custom resolutions
+        5. Store all versions in S3-compatible storage
+        6. Save metadata to Redis
+        
+        **Supported formats:** JPEG, PNG, GIF, WebP
+        **Maximum file size:** 10MB (configurable)
+        **Processing time:** Typically 200-500ms depending on image size
+        
+      operationId: uploadImage
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - image
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: Image file to upload (JPEG, PNG, GIF, or WebP)
+                  example: "[binary data]"
+                resolutions:
+                  type: array
+                  items:
+                    type: string
+                    pattern: '^[1-9]\d{0,3}x[1-9]\d{0,3}$'
+                    example: "800x600"
+                  description: |
+                    Optional array of custom resolutions to generate.
+                    Format: "WIDTHxHEIGHT" (e.g., ["800x600", "1200x900"])
+                    Maximum dimension: 10,000 pixels
+                  example: ["800x600", "1200x900"]
+            encoding:
+              image:
+                contentType: image/jpeg, image/png, image/gif, image/webp
+              resolutions:
+                style: form
+                explode: true
+      responses:
+        '201':
+          description: Image uploaded successfully
+          headers:
+            X-Request-ID:
+              schema:
+                type: string
+                format: uuid
+              description: Unique request identifier for tracing
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+              description: CORS allowed origin
+            Access-Control-Expose-Headers:
+              schema:
+                type: string
+              description: Headers exposed to the client
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+              example:
+                id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                message: "Image uploaded successfully"
+                resolutions: ["original", "thumbnail", "preview", "800x600", "1200x900"]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/images/{id}/info:
+    get:
+      tags:
+        - Images
+      summary: Get image metadata
+      description: |
+        Retrieve comprehensive metadata for an uploaded image, including:
+        - File information (name, size, format, dimensions)
+        - Available resolutions (original, thumbnail, preview, custom)
+        - Upload and modification timestamps
+        
+        This endpoint is lightweight and fast (~10ms response time).
+        
+      operationId: getImageInfo
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+      responses:
+        '200':
+          description: Image metadata retrieved successfully
+          headers:
+            X-Request-ID:
+              schema:
+                type: string
+                format: uuid
+              description: Unique request identifier for tracing
+            Cache-Control:
+              schema:
+                type: string
+              description: Caching directives
+              example: "public, max-age=300"
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+              description: CORS allowed origin
+            Access-Control-Expose-Headers:
+              schema:
+                type: string
+              description: Headers exposed to the client
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InfoResponse'
+              example:
+                id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                filename: "vacation-photo.jpg"
+                mime_type: "image/jpeg"
+                size: 2048000
+                dimensions:
+                  width: 1920
+                  height: 1080
+                available_resolutions: ["original", "thumbnail", "preview", "800x600", "1200x900"]
+                created_at: "2025-09-11T10:30:00Z"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/images/{id}/original:
+    get:
+      tags:
+        - Images
+      summary: Download original image
+      description: |
+        Download the original uploaded image file.
+        
+        **Features:**
+        - Streaming download for large files
+        - Proper caching headers for CDN compatibility
+        - ETag support for conditional requests
+        - Range request support for partial downloads
+        
+      operationId: downloadOriginal
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+        - $ref: '#/components/parameters/IfNoneMatch'
+        - $ref: '#/components/parameters/Range'
+      responses:
+        '200':
+          description: Original image file
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+              description: CORS allowed origin
+            Access-Control-Expose-Headers:
+              schema:
+                type: string
+              description: Headers exposed to the client
+            Content-Type:
+              schema:
+                type: string
+              description: MIME type of the image
+              example: "image/jpeg"
+            Content-Length:
+              schema:
+                type: integer
+              description: Size of the image in bytes
+              example: 2048000
+            Cache-Control:
+              schema:
+                type: string
+              description: Caching directives
+              example: "public, max-age=31536000, immutable"
+            ETag:
+              schema:
+                type: string
+              description: Entity tag for caching
+              example: '"abc123def456"'
+            X-Request-ID:
+              schema:
+                type: string
+                format: uuid
+              description: Unique request identifier for tracing
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Partial content (range request)
+          headers:
+            Content-Type:
+              schema:
+                type: string
+              example: "image/jpeg"
+            Content-Range:
+              schema:
+                type: string
+              example: "bytes 0-1023/2048000"
+            Content-Length:
+              schema:
+                type: integer
+              example: 1024
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        '304':
+          $ref: '#/components/responses/NotModified'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/images/{id}/thumbnail:
+    get:
+      tags:
+        - Images
+      summary: Download thumbnail
+      description: |
+        Download a 150x150 pixel thumbnail version of the image.
+        
+        **Processing:**
+        - Smart-fit algorithm maintains aspect ratio
+        - White background for letterboxing/pillarboxing
+        - Optimized compression for fast loading
+        
+      operationId: downloadThumbnail
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Thumbnail image (150x150)
+          headers:
+            Content-Type:
+              schema:
+                type: string
+              example: "image/jpeg"
+            Content-Length:
+              schema:
+                type: integer
+              example: 8192
+            Cache-Control:
+              schema:
+                type: string
+              example: "public, max-age=31536000, immutable"
+            ETag:
+              schema:
+                type: string
+              example: '"thumbnail-abc123"'
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        '304':
+          $ref: '#/components/responses/NotModified'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/images/{id}/preview:
+    get:
+      tags:
+        - Images
+      summary: Download preview
+      description: |
+        Download an 800x600 pixel preview version of the image.
+        
+        **Processing:**
+        - Smart-fit algorithm maintains aspect ratio
+        - White background for letterboxing/pillarboxing
+        - Balanced compression for quality and size
+        
+      operationId: downloadPreview
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Preview image (800x600)
+          headers:
+            Content-Type:
+              schema:
+                type: string
+              example: "image/jpeg"
+            Content-Length:
+              schema:
+                type: integer
+              example: 65536
+            Cache-Control:
+              schema:
+                type: string
+              example: "public, max-age=31536000, immutable"
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        '304':
+          $ref: '#/components/responses/NotModified'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/images/{id}/{resolution}:
+    get:
+      tags:
+        - Images
+      summary: Download custom resolution
+      description: |
+        Download a custom resolution version of the image.
+        
+        **Resolution Format:**
+        - Must match pattern: WIDTHxHEIGHT (e.g., "800x600", "1200x900")
+        - Both width and height must be positive integers
+        - Maximum dimension: 10,000 pixels
+        - Resolution must have been requested during upload
+        
+        **Processing:**
+        - Smart-fit algorithm maintains aspect ratio
+        - White background for letterboxing/pillarboxing
+        - Quality optimized for resolution size
+        
+      operationId: downloadCustomResolution
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+        - name: resolution
+          in: path
+          required: true
+          description: |
+            Custom resolution in WIDTHxHEIGHT format (e.g., "800x600").
+            Must be a resolution that was requested during upload.
+          schema:
+            type: string
+            pattern: '^[1-9]\d{0,3}x[1-9]\d{0,3}$'
+            example: "800x600"
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Custom resolution image
+          headers:
+            Content-Type:
+              schema:
+                type: string
+              example: "image/jpeg"
+            Content-Length:
+              schema:
+                type: integer
+              example: 131072
+            Cache-Control:
+              schema:
+                type: string
+              example: "public, max-age=31536000, immutable"
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        '304':
+          $ref: '#/components/responses/NotModified'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: |
+        Check the health status of the RESIZR service and its dependencies.
+        
+        **Health Checks Include:**
+        - Application status
+        - Redis connectivity and response time
+        - S3 storage accessibility
+        - System resources (memory, disk space)
+        
+        This endpoint is used by load balancers and monitoring systems.
+        
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: "healthy"
+                services:
+                  redis: "connected"
+                  s3: "connected" 
+                  application: "healthy"
+                timestamp: "2025-09-11T10:30:00Z"
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: "unhealthy"
+                services:
+                  redis: "disconnected"
+                  s3: "connected"
+                  application: "degraded"
+                timestamp: "2025-09-11T10:30:00Z"
+
+  /debug/vars:
+    get:
+      tags:
+        - Health
+      summary: Runtime metrics
+      description: |
+        Get runtime metrics and statistics (development mode only).
+        
+        **Available Metrics:**
+        - Memory usage and GC statistics
+        - Goroutine count
+        - HTTP request counters
+        - Image processing statistics
+        - Cache hit/miss ratios
+        
+        This endpoint is only available when the service is running in development mode.
+        
+      operationId: getRuntimeMetrics
+      responses:
+        '200':
+          description: Runtime metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsResponse'
+              example:
+                memory:
+                  alloc: 1048576
+                  total_alloc: 10485760
+                  sys: 67108864
+                  heap_alloc: 1048576
+                goroutines: 10
+                gc:
+                  num_gc: 5
+                  pause_ns: [500000, 400000, 600000]
+                uptime: "1h30m45s"
+                custom:
+                  upload_count: 150
+                  download_count: 2500
+                  cache_hit_ratio: 0.85
+        '404':
+          description: Metrics endpoint not available (production mode)
+
+components:
+  parameters:
+    ImageId:
+      name: id
+      in: path
+      required: true
+      description: Unique UUID identifier of the image
+      schema:
+        type: string
+        format: uuid
+        pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+    
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      description: ETag for conditional requests (returns 304 if not modified)
+      schema:
+        type: string
+      example: '"abc123def456"'
+    
+    Range:
+      name: Range
+      in: header
+      required: false
+      description: Byte range for partial content requests
+      schema:
+        type: string
+      example: "bytes=0-1023"
+
+  schemas:
+    UploadResponse:
+      type: object
+      required:
+        - id
+        - message
+        - resolutions
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for the uploaded image
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        message:
+          type: string
+          description: Success message
+          example: "Image uploaded successfully"
+        resolutions:
+          type: array
+          items:
+            type: string
+          description: List of available resolutions for this image
+          example: ["original", "thumbnail", "preview", "800x600", "1200x900"]
+
+    InfoResponse:
+      type: object
+      required:
+        - id
+        - filename
+        - mime_type
+        - size
+        - dimensions
+        - available_resolutions
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier of the image
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        filename:
+          type: string
+          description: Original filename from upload
+          example: "vacation-photo.jpg"
+        mime_type:
+          type: string
+          description: MIME type of the image
+          enum: ["image/jpeg", "image/png", "image/gif", "image/webp"]
+          example: "image/jpeg"
+        size:
+          type: integer
+          format: int64
+          description: File size in bytes
+          example: 2048000
+        dimensions:
+          $ref: '#/components/schemas/Dimensions'
+        available_resolutions:
+          type: array
+          items:
+            type: string
+          description: List of available resolutions for this image
+          example: ["original", "thumbnail", "preview", "800x600", "1200x900"]
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp when the image was uploaded
+          example: "2025-09-11T10:30:00Z"
+
+    Dimensions:
+      type: object
+      required:
+        - width
+        - height
+      properties:
+        width:
+          type: integer
+          description: Image width in pixels
+          example: 1920
+        height:
+          type: integer
+          description: Image height in pixels
+          example: 1080
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - services
+        - timestamp
+      properties:
+        status:
+          type: string
+          description: Overall health status
+          enum: ["healthy", "unhealthy", "degraded"]
+          example: "healthy"
+        services:
+          type: object
+          description: Status of individual services
+          additionalProperties:
+            type: string
+          example:
+            redis: "connected"
+            s3: "connected"
+            application: "healthy"
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp of the health check
+          example: "2025-09-11T10:30:00Z"
+
+    MetricsResponse:
+      type: object
+      description: Runtime metrics and statistics
+      properties:
+        memory:
+          type: object
+          properties:
+            alloc:
+              type: integer
+              description: Currently allocated bytes
+            total_alloc:
+              type: integer
+              description: Total allocated bytes (cumulative)
+            sys:
+              type: integer
+              description: System memory obtained from OS
+            heap_alloc:
+              type: integer
+              description: Heap allocated bytes
+        goroutines:
+          type: integer
+          description: Number of active goroutines
+        gc:
+          type: object
+          properties:
+            num_gc:
+              type: integer
+              description: Number of GC cycles
+            pause_ns:
+              type: array
+              items:
+                type: integer
+              description: Recent GC pause times in nanoseconds
+        uptime:
+          type: string
+          description: Service uptime
+        custom:
+          type: object
+          description: Application-specific metrics
+          additionalProperties: true
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - code
+      properties:
+        error:
+          type: string
+          description: Error category or type
+          example: "Validation failed"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "The uploaded file exceeds the maximum size limit"
+        code:
+          type: integer
+          description: HTTP status code
+          example: 400
+
+  responses:
+    BadRequest:
+      description: Bad request - invalid input
+      headers:
+        X-Request-ID:
+          schema:
+            type: string
+            format: uuid
+          description: Unique request identifier for tracing
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            InvalidFile:
+              summary: Invalid file format
+              value:
+                error: "Validation failed"
+                message: "Unsupported file format. Supported formats: JPEG, PNG, GIF, WebP"
+                code: 400
+            InvalidResolution:
+              summary: Invalid resolution format
+              value:
+                error: "Validation failed"
+                message: "Invalid resolution format. Use WIDTHxHEIGHT (e.g., 800x600)"
+                code: 400
+            InvalidUUID:
+              summary: Invalid UUID
+              value:
+                error: "Validation failed"
+                message: "Invalid UUID format"
+                code: 400
+
+    NotFound:
+      description: Resource not found
+      headers:
+        X-Request-ID:
+          schema:
+            type: string
+            format: uuid
+          description: Unique request identifier for tracing
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            ImageNotFound:
+              summary: Image not found
+              value:
+                error: "Resource not found"
+                message: "Image with ID 'f47ac10b-58cc-4372-a567-0e02b2c3d479' not found"
+                code: 404
+            ResolutionNotFound:
+              summary: Resolution not available
+              value:
+                error: "Resource not found"
+                message: "Resolution '800x600' not available for this image"
+                code: 404
+
+    PayloadTooLarge:
+      description: File size exceeds limit
+      headers:
+        X-Request-ID:
+          schema:
+            type: string
+            format: uuid
+          description: Unique request identifier for tracing
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Payload too large"
+            message: "File size exceeds the maximum limit of 10MB"
+            code: 413
+
+    UnsupportedMediaType:
+      description: Unsupported file format
+      headers:
+        X-Request-ID:
+          schema:
+            type: string
+            format: uuid
+          description: Unique request identifier for tracing
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Unsupported media type"
+            message: "File format not supported. Supported formats: JPEG, PNG, GIF, WebP"
+            code: 415
+
+    UnprocessableEntity:
+      description: Processing failed
+      headers:
+        X-Request-ID:
+          schema:
+            type: string
+            format: uuid
+          description: Unique request identifier for tracing
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            ProcessingFailed:
+              summary: Image processing failed
+              value:
+                error: "Processing failed"
+                message: "Failed to process image: corrupted or invalid image data"
+                code: 422
+            ResolutionTooLarge:
+              summary: Resolution too large
+              value:
+                error: "Processing failed"
+                message: "Requested resolution exceeds maximum dimension of 10,000 pixels"
+                code: 422
+
+    TooManyRequests:
+      description: Rate limit exceeded
+      headers:
+        X-Request-ID:
+          schema:
+            type: string
+            format: uuid
+          description: Unique request identifier for tracing
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying
+          example: 60
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Rate limit exceeded"
+            message: "Too many requests. Please try again later"
+            code: 429
+
+    InternalServerError:
+      description: Internal server error
+      headers:
+        X-Request-ID:
+          schema:
+            type: string
+            format: uuid
+          description: Unique request identifier for tracing
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Internal server error"
+            message: "An unexpected error occurred. Please try again later"
+            code: 500
+
+    ServiceUnavailable:
+      description: Service or dependencies unavailable
+      headers:
+        X-Request-ID:
+          schema:
+            type: string
+            format: uuid
+          description: Unique request identifier for tracing
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying
+          example: 300
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            RedisUnavailable:
+              summary: Redis connection failed
+              value:
+                error: "Service unavailable"
+                message: "Database service temporarily unavailable"
+                code: 503
+            S3Unavailable:
+              summary: Storage unavailable
+              value:
+                error: "Service unavailable"
+                message: "Storage service temporarily unavailable"
+                code: 503
+
+    NotModified:
+      description: Not modified (304) - content unchanged
+      headers:
+        ETag:
+          schema:
+            type: string
+          description: Entity tag
+          example: '"abc123def456"'
+        Cache-Control:
+          schema:
+            type: string
+          description: Caching directives
+          example: "public, max-age=31536000, immutable"
+
+security: []
+
+externalDocs:
+  description: RESIZR Documentation
+  url: https://github.com/your-org/resizr/blob/main/docs/new_docs/README.md
