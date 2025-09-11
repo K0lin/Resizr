@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"net/http"
-	"strings"
 
 	"resizr/internal/config"
 
@@ -19,35 +18,41 @@ func CORS(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		origin := c.Request.Header.Get("Origin")
+		var allowedOrigin bool
 
-		// Set CORS headers
-		if origin != "" {
-			if isAllowedOrigin(origin, cfg) {
-				c.Header("Access-Control-Allow-Origin", origin)
-			}
-		} else {
-			// For requests without Origin header (e.g., same-origin, Postman)
-			if cfg.IsDevelopment() || cfg.CORS.AllowAllOrigins {
-				c.Header("Access-Control-Allow-Origin", "*")
-			}
+		// Check if origin is allowed and set CORS headers only for allowed origins
+		if origin != "" && isAllowedOrigin(origin, cfg) {
+			c.Header("Access-Control-Allow-Origin", origin)
+			allowedOrigin = true
+		} else if origin == "" && cfg.CORS.AllowAllOrigins {
+			// Only set wildcard for non-origin requests if explicitly allowing all origins
+			c.Header("Access-Control-Allow-Origin", "*")
+			allowedOrigin = true
 		}
 
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-Requested-With")
-		c.Header("Access-Control-Expose-Headers", "X-Request-ID, Content-Length, Content-Type")
-		
-		// Set credentials header based on configuration
-		if cfg.CORS.AllowCredentials {
-			c.Header("Access-Control-Allow-Credentials", "true")
-		} else {
-			c.Header("Access-Control-Allow-Credentials", "false")
+		// Only set other CORS headers if origin is allowed
+		if allowedOrigin {
+			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-Requested-With")
+			c.Header("Access-Control-Expose-Headers", "X-Request-ID, Content-Length, Content-Type")
+
+			// Set credentials header based on configuration
+			if cfg.CORS.AllowCredentials {
+				c.Header("Access-Control-Allow-Credentials", "true")
+			} else {
+				c.Header("Access-Control-Allow-Credentials", "false")
+			}
+
+			c.Header("Access-Control-Max-Age", "86400") // 24 hours
 		}
-		
-		c.Header("Access-Control-Max-Age", "86400") // 24 hours
 
 		// Handle preflight requests
 		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusNoContent)
+			if allowedOrigin {
+				c.AbortWithStatus(http.StatusNoContent)
+			} else {
+				c.AbortWithStatus(http.StatusForbidden)
+			}
 			return
 		}
 
@@ -57,8 +62,8 @@ func CORS(cfg *config.Config) gin.HandlerFunc {
 
 // isAllowedOrigin checks if the origin is allowed
 func isAllowedOrigin(origin string, cfg *config.Config) bool {
-	// In development or if allow all origins is enabled, allow all origins
-	if cfg.IsDevelopment() || cfg.CORS.AllowAllOrigins {
+	// If allow all origins is enabled, allow all origins
+	if cfg.CORS.AllowAllOrigins {
 		return true
 	}
 
@@ -70,11 +75,6 @@ func isAllowedOrigin(origin string, cfg *config.Config) bool {
 		if origin == allowed {
 			return true
 		}
-	}
-
-	// Check subdomain pattern (*.resizr.dev)
-	if strings.HasSuffix(origin, ".resizr.dev") && strings.HasPrefix(origin, "https://") {
-		return true
 	}
 
 	return false

@@ -112,7 +112,7 @@ RATE_LIMIT_INFO=50           # Info endpoint rate limit per IP
 # CORS Configuration
 CORS_ENABLED=true            # Enable/disable CORS middleware entirely
 CORS_ALLOW_ALL_ORIGINS=false # Allow all origins (*) - use with caution
-CORS_ALLOWED_ORIGINS=https://resizr.dev,https://app.resizr.dev,https://admin.resizr.dev  # Comma-separated list of allowed origins
+CORS_ALLOWED_ORIGINS=https://domain.com,https://example.com
 CORS_ALLOW_CREDENTIALS=false # Allow credentials in CORS requests
 ```
 
