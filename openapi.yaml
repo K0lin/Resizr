@@ -29,7 +29,7 @@ info:
     ## Error Handling
     All errors follow a consistent JSON format with appropriate HTTP status codes.
     
-  version: 1.0.0
+  version: 0.0.1
   contact:
     name: RESIZR API Support
     email: support@resizr.dev

@@ -23,7 +23,7 @@ import (
 const (
 	// Application information
 	AppName    = "Resizr"
-	AppVersion = "1.0.0"
+	AppVersion = "0.0.1"
 
 	// Graceful shutdown timeout
 	ShutdownTimeout = 30 * time.Second

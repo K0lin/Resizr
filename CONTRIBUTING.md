@@ -678,7 +678,7 @@ If applicable, add screenshots.
 - OS: [e.g. Ubuntu 20.04]
 - Go Version: [e.g. 1.25.1]
 - Docker Version: [e.g. 20.10.8]
-- RESIZR Version: [e.g. 1.0.0]
+- RESIZR Version: [e.g. 0.0.1]
 
 **Additional Context**
 Any other context about the problem.
