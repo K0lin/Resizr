@@ -47,8 +47,10 @@
 ### Prerequisites
 
 - **Go 1.25+** - [Download Go](https://golang.org/dl/)
-- **Redis 6.0+** - For metadata and caching
-- **S3-Compatible Storage** - AWS S3 or MinIO
+- **S3-Compatible Storage** - AWS S3 or MinIO for image storage
+- **Cache Backend** (choose one):
+  - **Redis 6.0+** - When using `CACHE_TYPE=redis` (default)
+  - **File system** - When using `CACHE_TYPE=badger` (no external dependencies)
 - **Docker** (optional) - For containerized deployment
 
 ### 1. Installation
@@ -81,7 +83,12 @@ GIN_MODE=release             # Gin framework mode (debug/release/test)
 LOG_LEVEL=info               # Log level (debug/info/warn/error)
 LOG_FORMAT=json              # Log format (json/console)
 
-# Redis Configuration
+# Cache Configuration
+CACHE_TYPE=redis                    # Cache backend: redis or badger
+CACHE_DIRECTORY=./data/cache        # Directory for BadgerDB (only used when CACHE_TYPE=badger)
+CACHE_TTL=3600                      # Default cache TTL in seconds
+
+# Redis Configuration (only required when CACHE_TYPE=redis)
 REDIS_URL=redis://localhost:6379  # Redis connection URL
 REDIS_PASSWORD=              # Redis password (leave empty if no auth)
 REDIS_DB=0                   # Redis database number (0-15)
@@ -100,7 +107,6 @@ S3_URL_EXPIRE=3600                    # Pre-signed URL expiration in seconds
 # Image Processing Configuration
 MAX_FILE_SIZE=10485760        # Maximum upload file size in bytes (10MB)
 IMAGE_QUALITY=85              # JPEG compression quality (1-100, higher = better)
-CACHE_TTL=3600               # Cache time-to-live in seconds (1 hour)
 GENERATE_DEFAULT_RESOLUTIONS=true # Auto-generate thumbnail and preview resolutions
 RESIZE_MODE=smart_fit        # Image resize algorithm (smart_fit, crop, stretch)
 
@@ -120,6 +126,10 @@ CORS_ALLOW_CREDENTIALS=false # Allow credentials in CORS requests
 - When `GENERATE_DEFAULT_RESOLUTIONS=true` (default), the service automatically creates thumbnail (150x150) and preview (800x600) versions of every uploaded image
 - When set to `false`, only custom resolutions specified in the upload request will be generated
 - This allows for more control over storage usage and processing time in scenarios where default resolutions aren't needed
+
+**Cache Type Options:**
+- `redis` (default): Uses Redis for both metadata storage and caching. Requires Redis server.
+- `badger`: Uses BadgerDB for both metadata storage and caching. No external dependencies, stores data in local files.
 
 **Resize Mode Options:**
 - `smart_fit` (default): Maintains aspect ratio, fits image within dimensions with padding if needed
