@@ -285,7 +285,7 @@ func (p *ProcessorServiceImpl) smartFitResize(src image.Image, targetWidth, targ
 	resized := imaging.Resize(src, resizedWidth, resizedHeight, imaging.Lanczos)
 
 	// Create target canvas and center the resized image
-	canvas := imaging.New(targetWidth, targetHeight, color.RGBA{255, 255, 255, 255})
+	canvas := imaging.New(targetWidth, targetHeight, color.RGBA{0, 0, 0, 0})
 
 	// Calculate position to center the image
 	x := (targetWidth - resizedWidth) / 2
