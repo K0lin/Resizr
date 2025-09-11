@@ -97,6 +97,7 @@ paths:
                   description: |
                     Optional array of custom resolutions to generate.
                     Format: "WIDTHxHEIGHT" (e.g., ["800x600", "1200x900"])
+                    Supports multiple form fields or comma-separated values in a single field.
                     Maximum dimension: 10,000 pixels
                   example: ["800x600", "1200x900"]
             encoding:

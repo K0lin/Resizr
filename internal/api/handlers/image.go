@@ -84,7 +84,23 @@ func (h *ImageHandler) Upload(c *gin.Context) {
 
 	// Parse additional resolutions from form
 	var req models.UploadRequest
-	if err := c.ShouldBind(&req); err != nil {
+
+	// Get resolutions from form - handle both single and multiple field approaches
+	if values := c.Request.Form["resolutions"]; len(values) > 0 {
+		// Handle both multiple fields and comma-separated values
+		var allResolutions []string
+		for _, value := range values {
+			// Split each value by comma in case it contains multiple resolutions
+			splitValues := strings.Split(value, ",")
+			for _, splitValue := range splitValues {
+				trimmed := strings.TrimSpace(splitValue)
+				if trimmed != "" {
+					allResolutions = append(allResolutions, trimmed)
+				}
+			}
+		}
+		req.Resolutions = allResolutions
+	} else if err := c.ShouldBind(&req); err != nil {
 		logger.WarnWithContext(ctx, "Invalid resolution parameters",
 			zap.Error(err),
 			zap.String("request_id", requestID))

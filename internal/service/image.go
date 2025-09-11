@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"resizr/internal/config"
 	"resizr/internal/models"
@@ -349,15 +350,27 @@ func (s *ImageServiceImpl) validateUploadInput(input UploadInput) error {
 		}
 	}
 
-	// Validate requested resolutions
+	// Validate requested resolutions - support comma-separated values
+	validatedResolutions := []string{}
 	for _, resolution := range input.Resolutions {
-		if _, err := models.ParseResolution(resolution); err != nil {
-			return models.ValidationError{
-				Field:   "resolutions",
-				Message: fmt.Sprintf("Invalid resolution format '%s': %s", resolution, err.Error()),
+		// Handle comma-separated resolutions in a single field
+		resolutions := strings.Split(resolution, ",")
+		for _, res := range resolutions {
+			res = strings.TrimSpace(res) // Remove whitespace
+			if res == "" {
+				continue // Skip empty strings
 			}
+			if _, err := models.ParseResolution(res); err != nil {
+				return models.ValidationError{
+					Field:   "resolutions",
+					Message: fmt.Sprintf("Invalid resolution format '%s': %s", res, err.Error()),
+				}
+			}
+			validatedResolutions = append(validatedResolutions, res)
 		}
 	}
+	// Update input with parsed resolutions
+	input.Resolutions = validatedResolutions
 
 	return nil
 }

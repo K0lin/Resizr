@@ -204,11 +204,21 @@ Content-Type: multipart/form-data
 }
 ```
 
-**cURL Example:**
+**cURL Examples:**
+
+Comma-separated resolutions:
 ```bash
 curl -X POST http://localhost:8080/api/v1/images \
   -F "image=@vacation.jpg" \
   -F "resolutions=800x600,1200x900"
+```
+
+Multiple resolution fields:
+```bash
+curl -X POST http://localhost:8080/api/v1/images \
+  -F "image=@vacation.jpg" \
+  -F "resolutions=800x600" \
+  -F "resolutions=1200x900"
 ```
 
 ### 2. Get Image Info
