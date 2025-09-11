@@ -64,7 +64,7 @@ paths:
         The service will:
         1. Validate the uploaded file (format, size, etc.)
         2. Generate a unique UUID for the image
-        3. Process default resolutions (thumbnail, preview)
+        3. Process default resolutions (thumbnail, preview) if enabled via GENERATE_DEFAULT_RESOLUTIONS
         4. Process any requested custom resolutions
         5. Store all versions in S3-compatible storage
         6. Save metadata to Redis

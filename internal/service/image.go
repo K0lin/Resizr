@@ -101,8 +101,13 @@ func (s *ImageServiceImpl) ProcessUpload(ctx context.Context, input UploadInput)
 	processedResolutions := []string{}
 	processedSizes := make(map[string]int64)
 
-	// Always add predefined resolutions first
-	allResolutions := append([]string{"thumbnail", "preview"}, input.Resolutions...)
+	// Add predefined resolutions based on configuration
+	var allResolutions []string
+	if s.config.Image.GenerateDefaultResolutions {
+		allResolutions = append([]string{"thumbnail", "preview"}, input.Resolutions...)
+	} else {
+		allResolutions = input.Resolutions
+	}
 
 	for _, resolutionName := range allResolutions {
 		// Skip duplicates

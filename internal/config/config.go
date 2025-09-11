@@ -49,11 +49,12 @@ type S3Config struct {
 
 // ImageConfig holds image processing configuration
 type ImageConfig struct {
-	MaxFileSize        int64
-	Quality            int
-	CacheTTL           time.Duration
-	SupportedFormats   []string
-	DefaultResolutions map[string]ResolutionConfig
+	MaxFileSize                int64
+	Quality                    int
+	CacheTTL                   time.Duration
+	GenerateDefaultResolutions bool
+	SupportedFormats           []string
+	DefaultResolutions         map[string]ResolutionConfig
 }
 
 // ResolutionConfig defines image resolution parameters
@@ -110,10 +111,11 @@ func Load() (*Config, error) {
 			URLExpire: time.Duration(getEnvInt("S3_URL_EXPIRE", 3600)) * time.Second,
 		},
 		Image: ImageConfig{
-			MaxFileSize:      int64(getEnvInt("MAX_FILE_SIZE", 10485760)), // 10MB default
-			Quality:          getEnvInt("IMAGE_QUALITY", 85),
-			CacheTTL:         time.Duration(getEnvInt("CACHE_TTL", 3600)) * time.Second,
-			SupportedFormats: []string{"image/jpeg", "image/png", "image/gif", "image/webp"},
+			MaxFileSize:                int64(getEnvInt("MAX_FILE_SIZE", 10485760)), // 10MB default
+			Quality:                    getEnvInt("IMAGE_QUALITY", 85),
+			CacheTTL:                   time.Duration(getEnvInt("CACHE_TTL", 3600)) * time.Second,
+			GenerateDefaultResolutions: getEnvBool("GENERATE_DEFAULT_RESOLUTIONS", true),
+			SupportedFormats:           []string{"image/jpeg", "image/png", "image/gif", "image/webp"},
 			DefaultResolutions: map[string]ResolutionConfig{
 				"thumbnail": {Width: 150, Height: 150},
 				"preview":   {Width: 800, Height: 600},

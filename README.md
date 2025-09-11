@@ -13,7 +13,7 @@
 ## 🚀 Features
 
 ### Core Capabilities
-- **🎯 Multi-Resolution Processing**: Automatic thumbnail, preview, and custom resolution generation
+- **🎯 Multi-Resolution Processing**: Configurable automatic thumbnail, preview, and custom resolution generation
 - **⚡ High-Performance**: Streaming uploads/downloads, connection pooling, and optimized image processing
 - **🔒 Production Ready**: Rate limiting, health checks, structured logging, and comprehensive error handling
 - **☁️ Cloud Native**: Designed for containerization with Docker and Kubernetes support
@@ -101,6 +101,7 @@ S3_URL_EXPIRE=3600                    # Pre-signed URL expiration in seconds
 MAX_FILE_SIZE=10485760        # Maximum upload file size in bytes (10MB)
 IMAGE_QUALITY=85              # JPEG compression quality (1-100, higher = better)
 CACHE_TTL=3600               # Cache time-to-live in seconds (1 hour)
+GENERATE_DEFAULT_RESOLUTIONS=true # Auto-generate thumbnail and preview resolutions
 
 # Rate Limiting Configuration (requests per minute)
 RATE_LIMIT_UPLOAD=10         # Upload endpoint rate limit per IP
@@ -113,6 +114,11 @@ CORS_ALLOW_ALL_ORIGINS=false # Allow all origins (*) - use with caution
 CORS_ALLOWED_ORIGINS=https://resizr.dev,https://app.resizr.dev,https://admin.resizr.dev  # Comma-separated list of allowed origins
 CORS_ALLOW_CREDENTIALS=false # Allow credentials in CORS requests
 ```
+
+**Note on Resolution Processing:**
+- When `GENERATE_DEFAULT_RESOLUTIONS=true` (default), the service automatically creates thumbnail (150x150) and preview (800x600) versions of every uploaded image
+- When set to `false`, only custom resolutions specified in the upload request will be generated
+- This allows for more control over storage usage and processing time in scenarios where default resolutions aren't needed
 
 ### 3. Development Setup
 
