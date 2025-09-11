@@ -23,7 +23,7 @@
 ### Technical Features
 - **Clean Architecture**: Layered design with dependency injection for maintainability
 - **Context-Aware Logging**: Request tracing with structured JSON logging
-- **Smart Fit Algorithm**: Intelligent image resizing that maintains aspect ratios
+- **Configurable Resize Algorithms**: Smart fit, crop, or stretch modes for different use cases
 - **Format Support**: JPEG, PNG, GIF, and WebP with optimized compression
 - **Security First**: Input validation, file sanitization, and security headers
 
@@ -102,6 +102,7 @@ MAX_FILE_SIZE=10485760        # Maximum upload file size in bytes (10MB)
 IMAGE_QUALITY=85              # JPEG compression quality (1-100, higher = better)
 CACHE_TTL=3600               # Cache time-to-live in seconds (1 hour)
 GENERATE_DEFAULT_RESOLUTIONS=true # Auto-generate thumbnail and preview resolutions
+RESIZE_MODE=smart_fit        # Image resize algorithm (smart_fit, crop, stretch)
 
 # Rate Limiting Configuration (requests per minute)
 RATE_LIMIT_UPLOAD=10         # Upload endpoint rate limit per IP
@@ -119,6 +120,11 @@ CORS_ALLOW_CREDENTIALS=false # Allow credentials in CORS requests
 - When `GENERATE_DEFAULT_RESOLUTIONS=true` (default), the service automatically creates thumbnail (150x150) and preview (800x600) versions of every uploaded image
 - When set to `false`, only custom resolutions specified in the upload request will be generated
 - This allows for more control over storage usage and processing time in scenarios where default resolutions aren't needed
+
+**Resize Mode Options:**
+- `smart_fit` (default): Maintains aspect ratio, fits image within dimensions with padding if needed
+- `crop`: Crops image to exact dimensions while maintaining aspect ratio
+- `stretch`: Stretches image to exact dimensions, may distort aspect ratio
 
 ### 3. Development Setup
 

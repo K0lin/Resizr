@@ -397,7 +397,7 @@ func (s *ImageServiceImpl) processResolution(ctx context.Context, imageID, resol
 		Height:  resolutionConfig.Height,
 		Quality: s.config.Image.Quality,
 		Format:  mimeType,
-		Mode:    ResizeModeSmartFit,
+		Mode:    ResizeMode(s.config.Image.ResizeMode),
 	}
 
 	// Process the image

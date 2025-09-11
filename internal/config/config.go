@@ -53,6 +53,7 @@ type ImageConfig struct {
 	Quality                    int
 	CacheTTL                   time.Duration
 	GenerateDefaultResolutions bool
+	ResizeMode                 string
 	SupportedFormats           []string
 	DefaultResolutions         map[string]ResolutionConfig
 }
@@ -115,6 +116,7 @@ func Load() (*Config, error) {
 			Quality:                    getEnvInt("IMAGE_QUALITY", 85),
 			CacheTTL:                   time.Duration(getEnvInt("CACHE_TTL", 3600)) * time.Second,
 			GenerateDefaultResolutions: getEnvBool("GENERATE_DEFAULT_RESOLUTIONS", true),
+			ResizeMode:                 getEnv("RESIZE_MODE", "smart_fit"),
 			SupportedFormats:           []string{"image/jpeg", "image/png", "image/gif", "image/webp"},
 			DefaultResolutions: map[string]ResolutionConfig{
 				"thumbnail": {Width: 150, Height: 150},
@@ -180,6 +182,12 @@ func (c *Config) Validate() error {
 	// Validate rate limit configuration
 	if c.RateLimit.Upload <= 0 || c.RateLimit.Download <= 0 || c.RateLimit.Info <= 0 {
 		return fmt.Errorf("rate limits must be positive integers")
+	}
+
+	// Validate resize mode configuration
+	validResizeModes := []string{"smart_fit", "crop", "stretch"}
+	if !contains(validResizeModes, c.Image.ResizeMode) {
+		return fmt.Errorf("RESIZE_MODE must be one of: %s", strings.Join(validResizeModes, ", "))
 	}
 
 	// Validate logger configuration

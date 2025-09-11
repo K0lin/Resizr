@@ -6,7 +6,7 @@ info:
     **RESIZR** is a high-performance image processing service that provides RESTful APIs for image upload, processing, and delivery. 
     
     ## Features
-    - Multi-resolution image processing with smart-fit algorithm
+    - Multi-resolution image processing with configurable resize algorithms (smart-fit, crop, stretch)
     - Support for JPEG, PNG, GIF, and WebP formats
     - Redis-based metadata storage and caching
     - S3-compatible storage backend
