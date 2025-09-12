@@ -84,6 +84,14 @@ func (r *Router) setupRoutes() {
 			images.GET("/:id/original", r.imageHandler.DownloadOriginal)
 			images.GET("/:id/thumbnail", r.imageHandler.DownloadThumbnail)
 			images.GET("/:id/preview", r.imageHandler.DownloadPreview)
+
+			// Presigned URL generation (must come before custom resolution to avoid conflicts)
+			images.GET("/:id/original/presigned-url", r.imageHandler.GeneratePresignedURL)
+			images.GET("/:id/thumbnail/presigned-url", r.imageHandler.GeneratePresignedURL)
+			images.GET("/:id/preview/presigned-url", r.imageHandler.GeneratePresignedURL)
+			images.GET("/:id/:resolution/presigned-url", r.imageHandler.GeneratePresignedURL)
+
+			// Custom resolution download (must come last due to wildcard)
 			images.GET("/:id/:resolution", r.imageHandler.DownloadCustomResolution)
 
 			// Optional: Delete image (future feature)

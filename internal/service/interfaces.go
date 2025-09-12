@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"io"
+	"time"
 
 	"resizr/internal/models"
 )
@@ -26,6 +27,9 @@ type ImageService interface {
 
 	// ListImages retrieves paginated list of images
 	ListImages(ctx context.Context, offset, limit int) ([]*models.ImageMetadata, int, error)
+
+	// GeneratePresignedURL generates a pre-signed URL for direct access to storage
+	GeneratePresignedURL(ctx context.Context, storageKey string, duration time.Duration) (string, error)
 }
 
 // HealthService defines the interface for health checking
