@@ -21,7 +21,21 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.25.1'  
+        go-version: '1.25.1' 
+        
+    - name: Prepare Go modules
+      run: |
+        echo "=== Checking go.mod ==="
+        cat go.mod
+        
+        echo "=== Generating/Updating go.sum ==="
+        go mod tidy
+        
+        echo "=== Verifying modules ==="
+        go mod verify || true
+        
+        echo "=== Files after go mod tidy ==="
+        ls -la go.*
         
     - name: Run tests
       run: |
