@@ -103,6 +103,8 @@ IMAGE_QUALITY=85              # JPEG compression quality (1-100, higher = better
 CACHE_TTL=3600               # Cache time-to-live in seconds (1 hour)
 GENERATE_DEFAULT_RESOLUTIONS=true # Auto-generate thumbnail and preview resolutions
 RESIZE_MODE=smart_fit        # Image resize algorithm (smart_fit, crop, stretch)
+IMAGE_MAX_WIDTH=4096         # Maximum allowed width for requested/custom resolutions
+IMAGE_MAX_HEIGHT=4096        # Maximum allowed height for requested/custom resolutions
 
 # Rate Limiting Configuration (requests per minute)
 RATE_LIMIT_UPLOAD=10         # Upload endpoint rate limit per IP
@@ -120,6 +122,8 @@ CORS_ALLOW_CREDENTIALS=false # Allow credentials in CORS requests
 - When `GENERATE_DEFAULT_RESOLUTIONS=true` (default), the service automatically creates thumbnail (150x150) and preview (800x600) versions of every uploaded image
 - When set to `false`, only custom resolutions specified in the upload request will be generated
 - This allows for more control over storage usage and processing time in scenarios where default resolutions aren't needed
+
+Maximum dimensions for requested custom resolutions are controlled by `IMAGE_MAX_WIDTH` and `IMAGE_MAX_HEIGHT` (defaults: 4096x4096). Requests exceeding these limits are rejected during validation and processing. For safety, the service also enforces a hard upper bound of 4096 per side.
 
 **Resize Mode Options:**
 - `smart_fit` (default): Maintains aspect ratio, fits image within dimensions with padding if needed
@@ -356,6 +360,8 @@ RESIZR uses environment variables for configuration following the [12-Factor App
 - `MAX_FILE_SIZE` (default: `10485760`): Maximum file size in bytes (10MB)
 - `IMAGE_QUALITY` (default: `85`): JPEG compression quality (1-100)
 - `CACHE_TTL` (default: `3600`): Cache TTL in seconds
+- `IMAGE_MAX_WIDTH` (default: `4096`): Max allowed width for requested/custom resolutions
+- `IMAGE_MAX_HEIGHT` (default: `4096`): Max allowed height for requested/custom resolutions
 
 #### Rate Limiting Configuration
 - `RATE_LIMIT_UPLOAD` (default: `10`): Upload requests per minute per IP

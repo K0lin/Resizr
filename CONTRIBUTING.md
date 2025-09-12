@@ -236,7 +236,8 @@ func ProcessImage(data []byte) error
 func validateImageFormat(data []byte) error
 
 // ✅ Good: Constants use descriptive names
-const MaxImageDimension = 10000
+const MaxImageWidth = 4096  // default, configurable via IMAGE_MAX_WIDTH
+const MaxImageHeight = 4096 // default, configurable via IMAGE_MAX_HEIGHT
 
 // ✅ Good: Interfaces end with -er when appropriate
 type ImageProcessor interface {

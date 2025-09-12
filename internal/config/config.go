@@ -49,13 +49,15 @@ type S3Config struct {
 
 // ImageConfig holds image processing configuration
 type ImageConfig struct {
-	MaxFileSize                int64
-	Quality                    int
-	CacheTTL                   time.Duration
-	GenerateDefaultResolutions bool
-	ResizeMode                 string
-	SupportedFormats           []string
-	DefaultResolutions         map[string]ResolutionConfig
+    MaxFileSize                int64
+    Quality                    int
+    CacheTTL                   time.Duration
+    GenerateDefaultResolutions bool
+    ResizeMode                 string
+    SupportedFormats           []string
+    DefaultResolutions         map[string]ResolutionConfig
+    MaxWidth                   int
+    MaxHeight                  int
 }
 
 // ResolutionConfig defines image resolution parameters
@@ -111,18 +113,20 @@ func Load() (*Config, error) {
 			UseSSL:    getEnvBool("S3_USE_SSL", true),
 			URLExpire: time.Duration(getEnvInt("S3_URL_EXPIRE", 3600)) * time.Second,
 		},
-		Image: ImageConfig{
-			MaxFileSize:                int64(getEnvInt("MAX_FILE_SIZE", 10485760)), // 10MB default
-			Quality:                    getEnvInt("IMAGE_QUALITY", 85),
-			CacheTTL:                   time.Duration(getEnvInt("CACHE_TTL", 3600)) * time.Second,
-			GenerateDefaultResolutions: getEnvBool("GENERATE_DEFAULT_RESOLUTIONS", true),
-			ResizeMode:                 getEnv("RESIZE_MODE", "smart_fit"),
-			SupportedFormats:           []string{"image/jpeg", "image/png", "image/gif", "image/webp"},
-			DefaultResolutions: map[string]ResolutionConfig{
-				"thumbnail": {Width: 150, Height: 150},
-				"preview":   {Width: 800, Height: 600},
-			},
-		},
+        Image: ImageConfig{
+            MaxFileSize:                int64(getEnvInt("MAX_FILE_SIZE", 10485760)), // 10MB default
+            Quality:                    getEnvInt("IMAGE_QUALITY", 85),
+            CacheTTL:                   time.Duration(getEnvInt("CACHE_TTL", 3600)) * time.Second,
+            GenerateDefaultResolutions: getEnvBool("GENERATE_DEFAULT_RESOLUTIONS", true),
+            ResizeMode:                 getEnv("RESIZE_MODE", "smart_fit"),
+            SupportedFormats:           []string{"image/jpeg", "image/png", "image/gif", "image/webp"},
+            DefaultResolutions: map[string]ResolutionConfig{
+                "thumbnail": {Width: 150, Height: 150},
+                "preview":   {Width: 800, Height: 600},
+            },
+            MaxWidth:  getEnvInt("IMAGE_MAX_WIDTH", 4096),
+            MaxHeight: getEnvInt("IMAGE_MAX_HEIGHT", 4096),
+        },
 		RateLimit: RateLimitConfig{
 			Upload:   getEnvInt("RATE_LIMIT_UPLOAD", 10),
 			Download: getEnvInt("RATE_LIMIT_DOWNLOAD", 100),
@@ -179,10 +183,10 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("IMAGE_QUALITY must be between 1 and 100")
 	}
 
-	// Validate rate limit configuration
-	if c.RateLimit.Upload <= 0 || c.RateLimit.Download <= 0 || c.RateLimit.Info <= 0 {
-		return fmt.Errorf("rate limits must be positive integers")
-	}
+    // Validate rate limit configuration
+    if c.RateLimit.Upload <= 0 || c.RateLimit.Download <= 0 || c.RateLimit.Info <= 0 {
+        return fmt.Errorf("rate limits must be positive integers")
+    }
 
 	// Validate resize mode configuration
 	validResizeModes := []string{"smart_fit", "crop", "stretch"}
@@ -196,12 +200,20 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("LOG_LEVEL must be one of: %s", strings.Join(validLogLevels, ", "))
 	}
 
-	validLogFormats := []string{"json", "console"}
-	if !contains(validLogFormats, c.Logger.Format) {
-		return fmt.Errorf("LOG_FORMAT must be one of: %s", strings.Join(validLogFormats, ", "))
-	}
+    validLogFormats := []string{"json", "console"}
+    if !contains(validLogFormats, c.Logger.Format) {
+        return fmt.Errorf("LOG_FORMAT must be one of: %s", strings.Join(validLogFormats, ", "))
+    }
 
-	return nil
+    // Validate image max dimensions (must be positive)
+    if c.Image.MaxWidth <= 0 {
+        return fmt.Errorf("IMAGE_MAX_WIDTH must be a positive integer")
+    }
+    if c.Image.MaxHeight <= 0 {
+        return fmt.Errorf("IMAGE_MAX_HEIGHT must be a positive integer")
+    }
+
+    return nil
 }
 
 // IsDevelopment returns true if running in development mode

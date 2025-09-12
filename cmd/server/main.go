@@ -77,9 +77,19 @@ func run() error {
 		return fmt.Errorf("failed to initialize storage: %w", err)
 	}
 
-	// Initialize image processor
-	logger.Info("Initializing image processor...")
-    processor := service.NewProcessorService(4096) // Max 4096 pixels per dimension
+    // Initialize image processor
+    logger.Info("Initializing image processor...")
+    // Allow configuration via env (IMAGE_MAX_WIDTH/IMAGE_MAX_HEIGHT) with sensible defaults
+    maxW := cfg.Image.MaxWidth
+    maxH := cfg.Image.MaxHeight
+    // Hard cap at 4096 to prevent excessive memory usage even if misconfigured
+    if maxW <= 0 || maxW > 4096 {
+        maxW = 4096
+    }
+    if maxH <= 0 || maxH > 4096 {
+        maxH = 4096
+    }
+    processor := service.NewProcessorService(maxW, maxH)
 
 	// Initialize services
 	logger.Info("Initializing services...")

@@ -98,7 +98,7 @@ paths:
                     Optional array of custom resolutions to generate.
                     Format: "WIDTHxHEIGHT" (e.g., ["800x600", "1200x900"])
                     Supports multiple form fields or comma-separated values in a single field.
-                    Maximum dimension: 4,096 pixels
+                    Maximum dimension (default): 4,096 pixels. Configurable via IMAGE_MAX_WIDTH and IMAGE_MAX_HEIGHT.
                   example: ["800x600", "1200x900"]
             encoding:
               image:
@@ -404,7 +404,7 @@ paths:
         **Resolution Format:**
         - Must match pattern: WIDTHxHEIGHT (e.g., "800x600", "1200x900")
         - Both width and height must be positive integers
-        - Maximum dimension: 4,096 pixels
+        - Maximum dimension (default): 4,096 pixels. Configurable via IMAGE_MAX_WIDTH and IMAGE_MAX_HEIGHT.
         - Resolution must have been requested during upload
         
         **Processing:**

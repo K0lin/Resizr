@@ -365,15 +365,23 @@ func (s *ImageServiceImpl) validateUploadInput(input UploadInput) error {
 			if res == "" {
 				continue // Skip empty strings
 			}
-			if _, err := models.ParseResolution(res); err != nil {
-				return models.ValidationError{
-					Field:   "resolutions",
-					Message: fmt.Sprintf("Invalid resolution format '%s': %s", res, err.Error()),
-				}
-			}
-			validatedResolutions = append(validatedResolutions, res)
-		}
-	}
+            if rc, err := models.ParseResolution(res); err != nil {
+                return models.ValidationError{
+                    Field:   "resolutions",
+                    Message: fmt.Sprintf("Invalid resolution format '%s': %s", res, err.Error()),
+                }
+            } else {
+                // Enforce configured maximums for requested resolutions
+                if rc.Width > s.config.Image.MaxWidth || rc.Height > s.config.Image.MaxHeight {
+                    return models.ValidationError{
+                        Field:   "resolutions",
+                        Message: fmt.Sprintf("Requested resolution '%s' exceeds maximum configured %dx%d", res, s.config.Image.MaxWidth, s.config.Image.MaxHeight),
+                    }
+                }
+            }
+            validatedResolutions = append(validatedResolutions, res)
+        }
+    }
 	// Update input with parsed resolutions
 	input.Resolutions = validatedResolutions
 
