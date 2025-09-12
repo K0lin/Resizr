@@ -98,7 +98,7 @@ paths:
                     Optional array of custom resolutions to generate.
                     Format: "WIDTHxHEIGHT" (e.g., ["800x600", "1200x900"])
                     Supports multiple form fields or comma-separated values in a single field.
-                    Maximum dimension: 10,000 pixels
+                    Maximum dimension (hard cap): 8,192 pixels. Default is 4,096 and configurable via IMAGE_MAX_WIDTH and IMAGE_MAX_HEIGHT up to the hard cap.
                   example: ["800x600", "1200x900"]
             encoding:
               image:
@@ -473,7 +473,7 @@ paths:
         **Resolution Format:**
         - Must match pattern: WIDTHxHEIGHT (e.g., "800x600", "1200x900")
         - Both width and height must be positive integers
-        - Maximum dimension: 10,000 pixels
+        - Maximum dimension (hard cap): 8,192 pixels. Default is 4,096 and configurable via IMAGE_MAX_WIDTH and IMAGE_MAX_HEIGHT up to the hard cap.
         - Resolution must have been requested during upload
         
         **Processing:**
@@ -965,7 +965,7 @@ components:
               summary: Resolution too large
               value:
                 error: "Processing failed"
-                message: "Requested resolution exceeds maximum dimension of 10,000 pixels"
+                message: "Requested resolution exceeds maximum dimension of 8,192 pixels"
                 code: 422
 
     TooManyRequests:
