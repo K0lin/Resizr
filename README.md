@@ -192,6 +192,7 @@ https://your-domain.com/api/v1
 | `GET` | `/images/{id}/thumbnail` | Download thumbnail (150x150) | 100/min |
 | `GET` | `/images/{id}/preview` | Download preview (800x600) | 100/min |
 | `GET` | `/images/{id}/{resolution}` | Download custom resolution | 100/min |
+| `GET` | `/images/{id}/{resolution}/presigned-url` | Generate presigned URL for direct access | 50/min |
 | `GET` | `/health` | Health check | Unlimited |
 
 ### 1. Upload Image
@@ -257,7 +258,54 @@ GET /api/v1/images/{id}/info
 }
 ```
 
-### 3. Download Images
+### 3. Generate Presigned URL
+
+**Generate a temporary presigned URL for direct image access**
+
+```http
+GET /api/v1/images/{id}/{resolution}/presigned-url
+```
+
+**Path Parameters:**
+- `id` (string, required): Image UUID
+- `resolution` (string, required): Image size - `original`, `thumbnail`, `preview`, or custom resolution like `800x600`
+
+**Query Parameters:**
+- `expires_in` (integer, optional): Expiration time in seconds (default: 3600, max: 604800)
+
+**Response (200 OK):**
+```json
+{
+  "url": "https://bucket.s3.amazonaws.com/images/f47ac10b-58cc-4372-a567-0e02b2c3d479/thumbnail.jpg?X-Amz-Algorithm=...",
+  "expires_at": "2025-09-12T16:30:00Z",
+  "expires_in": 3600
+}
+```
+
+**cURL Examples:**
+
+Generate presigned URL for thumbnail (1 hour expiration):
+```bash
+curl "http://localhost:8080/api/v1/images/f47ac10b-58cc-4372-a567-0e02b2c3d479/thumbnail/presigned-url?expires_in=3600"
+```
+
+Generate presigned URL for custom resolution (24 hours expiration):
+```bash
+curl "http://localhost:8080/api/v1/images/f47ac10b-58cc-4372-a567-0e02b2c3d479/800x600/presigned-url?expires_in=86400"
+```
+
+Generate presigned URL for original image (default 1 hour expiration):
+```bash
+curl "http://localhost:8080/api/v1/images/f47ac10b-58cc-4372-a567-0e02b2c3d479/original/presigned-url"
+```
+
+**Use Cases:**
+- Client-side direct downloads without server proxy
+- Temporary sharing of images with expiration
+- Mobile app integration with direct S3 access
+- Reducing server bandwidth for large images
+
+### 4. Download Images
 
 **Download images in various resolutions**
 
@@ -279,7 +327,7 @@ GET /api/v1/images/{id}/800x600      # Custom WIDTHxHEIGHT
 - `Cache-Control`: `public, max-age=31536000, immutable`
 - Body: Binary image data
 
-### 4. Health Check
+### 5. Health Check
 
 **Check service health and dependencies**
 
