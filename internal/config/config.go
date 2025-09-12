@@ -19,6 +19,7 @@ type Config struct {
 	RateLimit RateLimitConfig
 	Logger    LoggerConfig
 	CORS      CORSConfig
+	Canvas    CanvasConfig
 }
 
 // ServerConfig holds HTTP server configuration
@@ -85,6 +86,11 @@ type CORSConfig struct {
 	AllowCredentials bool     // Allow credentials in CORS requests
 }
 
+// CanvasConfig holds canvas configuration
+type CanvasConfig struct {
+	BackgroundColor string
+}
+
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
 	// Load .env file if it exists (for development)
@@ -137,6 +143,9 @@ func Load() (*Config, error) {
 			AllowAllOrigins:  getEnvBool("CORS_ALLOW_ALL_ORIGINS", false),
 			AllowedOrigins:   getEnvStringSlice("CORS_ALLOWED_ORIGINS", []string{"*"}),
 			AllowCredentials: getEnvBool("CORS_ALLOW_CREDENTIALS", false),
+		},
+		Canvas: CanvasConfig{
+			BackgroundColor: getEnv("BACKGROUND_COLOR", "#000000"),
 		},
 	}
 

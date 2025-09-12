@@ -72,11 +72,12 @@ type UploadResult struct {
 
 // ResizeConfig represents image resizing configuration
 type ResizeConfig struct {
-	Width   int        `json:"width"`
-	Height  int        `json:"height"`
-	Quality int        `json:"quality"`
-	Format  string     `json:"format"`
-	Mode    ResizeMode `json:"mode"`
+	Width           int        `json:"width"`
+	Height          int        `json:"height"`
+	Quality         int        `json:"quality"`
+	Format          string     `json:"format"`
+	Mode            ResizeMode `json:"mode"`
+	BackgroundColor string     `json:"background_color"`
 }
 
 // ResizeMode defines how image should be resized
