@@ -14,6 +14,7 @@ import (
 type Config struct {
 	Server    ServerConfig
 	Redis     RedisConfig
+	Cache     CacheConfig
 	S3        S3Config
 	Image     ImageConfig
 	RateLimit RateLimitConfig
@@ -77,6 +78,16 @@ type LoggerConfig struct {
 	Format string // "json", "console"
 }
 
+// CacheConfig holds cache configuration
+// Supports two backend types:
+// - "redis": Uses Redis for both metadata and caching (requires Redis server)
+// - "badger": Uses BadgerDB for both metadata and caching (embedded, no external dependencies)
+type CacheConfig struct {
+	Type      string        // Cache type: "redis" or "badger"
+	Directory string        // Directory for BadgerDB files (only used when type=badger)
+	TTL       time.Duration // Default TTL for cache entries
+}
+
 // CORSConfig holds CORS configuration
 type CORSConfig struct {
 	Enabled          bool     // Enable/disable CORS
@@ -101,6 +112,11 @@ func Load() (*Config, error) {
 			DB:       getEnvInt("REDIS_DB", 0),
 			PoolSize: getEnvInt("REDIS_POOL_SIZE", 10),
 			Timeout:  time.Duration(getEnvInt("REDIS_TIMEOUT", 5)) * time.Second,
+		},
+		Cache: CacheConfig{
+			Type:      getEnv("CACHE_TYPE", "redis"),
+			Directory: getEnv("CACHE_DIRECTORY", "./data/cache"),
+			TTL:       time.Duration(getEnvInt("CACHE_TTL", 3600)) * time.Second,
 		},
 		S3: S3Config{
 			Endpoint:  getEnv("S3_ENDPOINT", "https://s3.amazonaws.com"),
@@ -166,9 +182,22 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("PORT cannot be empty")
 	}
 
-	// Validate Redis configuration
-	if c.Redis.URL == "" {
-		return fmt.Errorf("REDIS_URL is required")
+	// Validate cache configuration
+	validCacheTypes := []string{"redis", "badger"}
+	if !contains(validCacheTypes, c.Cache.Type) {
+		return fmt.Errorf("CACHE_TYPE must be one of: %s", strings.Join(validCacheTypes, ", "))
+	}
+
+	// Validate Redis configuration (only if using Redis cache)
+	if c.Cache.Type == "redis" {
+		if c.Redis.URL == "" {
+			return fmt.Errorf("REDIS_URL is required when CACHE_TYPE=redis")
+		}
+	}
+
+	// Validate BadgerDB configuration (only if using BadgerDB cache)
+	if c.Cache.Type == "badger" && c.Cache.Directory == "" {
+		return fmt.Errorf("CACHE_DIRECTORY is required when CACHE_TYPE=badger")
 	}
 
 	// Validate image configuration

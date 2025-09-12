@@ -56,11 +56,11 @@ func run() error {
 		zap.String("port", cfg.Server.Port),
 		zap.Bool("development", cfg.IsDevelopment()))
 
-	// Initialize repository (Redis)
-	logger.Info("Initializing Redis repository...")
-	repo, err := repository.NewRedisRepository(&cfg.Redis)
+	// Initialize repository (composite: Redis + configurable cache)
+	logger.Info("Initializing image repository...")
+	repo, err := repository.NewImageRepository(cfg)
 	if err != nil {
-		logger.Fatal("Failed to initialize Redis repository", zap.Error(err))
+		logger.Fatal("Failed to initialize image repository", zap.Error(err))
 		return fmt.Errorf("failed to initialize repository: %w", err)
 	}
 	defer func() {
