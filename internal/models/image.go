@@ -52,6 +52,13 @@ type InfoResponse struct {
 	CreatedAt            time.Time     `json:"created_at"`
 }
 
+// PresignedURLResponse represents the response for presigned URL endpoint
+type PresignedURLResponse struct {
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expires_at"`
+	ExpiresIn int       `json:"expires_in"` // seconds
+}
+
 // DimensionInfo represents image dimensions
 type DimensionInfo struct {
 	Width  int `json:"width"`

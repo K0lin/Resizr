@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"resizr/internal/config"
 	"resizr/internal/models"
@@ -328,6 +329,31 @@ func (s *ImageServiceImpl) ListImages(ctx context.Context, offset, limit int) ([
 	total := -1
 
 	return images, total, nil
+}
+
+// GeneratePresignedURL generates a pre-signed URL for direct access to storage
+func (s *ImageServiceImpl) GeneratePresignedURL(ctx context.Context, storageKey string, duration time.Duration) (string, error) {
+	logger.DebugWithContext(ctx, "Generating presigned URL",
+		zap.String("storage_key", storageKey),
+		zap.Duration("duration", duration))
+
+	presignedURL, err := s.storage.GeneratePresignedURL(ctx, storageKey, duration)
+	if err != nil {
+		logger.ErrorWithContext(ctx, "Failed to generate presigned URL",
+			zap.String("storage_key", storageKey),
+			zap.Error(err))
+		return "", models.StorageError{
+			Operation: "generate_presigned_url",
+			Backend:   "S3",
+			Reason:    err.Error(),
+		}
+	}
+
+	logger.InfoWithContext(ctx, "Presigned URL generated successfully",
+		zap.String("storage_key", storageKey),
+		zap.Duration("duration", duration))
+
+	return presignedURL, nil
 }
 
 // Helper methods
