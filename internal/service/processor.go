@@ -24,9 +24,9 @@ type ProcessorServiceImpl struct {
 
 // NewProcessorService creates a new image processor service
 func NewProcessorService(maxImageDimension int) ProcessorService {
-	if maxImageDimension <= 0 {
-		maxImageDimension = 10000 // Default maximum
-	}
+    if maxImageDimension <= 0 {
+        maxImageDimension = 4096 // Default maximum lowered for safety
+    }
 
 	return &ProcessorServiceImpl{
 		maxImageDimension: maxImageDimension,

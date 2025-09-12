@@ -79,7 +79,7 @@ func run() error {
 
 	// Initialize image processor
 	logger.Info("Initializing image processor...")
-	processor := service.NewProcessorService(10000) // Max 10k pixels per dimension
+    processor := service.NewProcessorService(4096) // Max 4096 pixels per dimension
 
 	// Initialize services
 	logger.Info("Initializing services...")
