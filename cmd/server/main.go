@@ -82,12 +82,12 @@ func run() error {
     // Allow configuration via env (IMAGE_MAX_WIDTH/IMAGE_MAX_HEIGHT) with sensible defaults
     maxW := cfg.Image.MaxWidth
     maxH := cfg.Image.MaxHeight
-    // Hard cap at 4096 to prevent excessive memory usage even if misconfigured
-    if maxW <= 0 || maxW > 4096 {
-        maxW = 4096
+    // Hard cap at 8192 to prevent excessive memory usage even if misconfigured
+    if maxW <= 0 || maxW > 8192 {
+        maxW = 8192
     }
-    if maxH <= 0 || maxH > 4096 {
-        maxH = 4096
+    if maxH <= 0 || maxH > 8192 {
+        maxH = 8192
     }
     processor := service.NewProcessorService(maxW, maxH)
 

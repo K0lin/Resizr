@@ -285,8 +285,8 @@ func ParseResolution(resolution string) (ResolutionConfig, error) {
 		return ResolutionConfig{}, fmt.Errorf("width and height must be positive")
 	}
 
-    // Enforce a stricter upper bound to prevent excessive memory usage
-    const maxDimension = 4096
+    // Enforce an upper bound to prevent excessive memory usage
+    const maxDimension = 8192
     if width > maxDimension || height > maxDimension {
         return ResolutionConfig{}, fmt.Errorf("width and height cannot exceed %d pixels", maxDimension)
     }
