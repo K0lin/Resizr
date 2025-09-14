@@ -47,8 +47,10 @@
 ### Prerequisites
 
 - **Go 1.25+** - [Download Go](https://golang.org/dl/)
-- **Redis 6.0+** - For metadata and caching
-- **S3-Compatible Storage** - AWS S3 or MinIO
+- **S3-Compatible Storage** - AWS S3 or MinIO for image storage
+- **Cache Backend** (choose one):
+  - **Redis 6.0+** - When using `CACHE_TYPE=redis` (default)
+  - **File system** - When using `CACHE_TYPE=badger` (no external dependencies)
 - **Docker** (optional) - For containerized deployment
 
 ### 1. Installation
@@ -81,7 +83,12 @@ GIN_MODE=release             # Gin framework mode (debug/release/test)
 LOG_LEVEL=info               # Log level (debug/info/warn/error)
 LOG_FORMAT=json              # Log format (json/console)
 
-# Redis Configuration
+# Cache Configuration
+CACHE_TYPE=redis                    # Cache backend: redis or badger
+CACHE_DIRECTORY=./data/cache        # Directory for BadgerDB (only used when CACHE_TYPE=badger)
+CACHE_TTL=3600                      # Default cache TTL in seconds
+
+# Redis Configuration (only required when CACHE_TYPE=redis)
 REDIS_URL=redis://localhost:6379  # Redis connection URL
 REDIS_PASSWORD=              # Redis password (leave empty if no auth)
 REDIS_DB=0                   # Redis database number (0-15)
@@ -100,9 +107,10 @@ S3_URL_EXPIRE=3600                    # Pre-signed URL expiration in seconds
 # Image Processing Configuration
 MAX_FILE_SIZE=10485760        # Maximum upload file size in bytes (10MB)
 IMAGE_QUALITY=85              # JPEG compression quality (1-100, higher = better)
-CACHE_TTL=3600               # Cache time-to-live in seconds (1 hour)
 GENERATE_DEFAULT_RESOLUTIONS=true # Auto-generate thumbnail and preview resolutions
 RESIZE_MODE=smart_fit        # Image resize algorithm (smart_fit, crop, stretch)
+IMAGE_MAX_WIDTH=4096         # Maximum allowed width for requested/custom resolutions (up to 8192)
+IMAGE_MAX_HEIGHT=4096        # Maximum allowed height for requested/custom resolutions (up to 8192)
 
 # Rate Limiting Configuration (requests per minute)
 RATE_LIMIT_UPLOAD=10         # Upload endpoint rate limit per IP
@@ -123,6 +131,14 @@ BACKGROUND_COLOR="#000000" # Canvas background color setup
 - When `GENERATE_DEFAULT_RESOLUTIONS=true` (default), the service automatically creates thumbnail (150x150) and preview (800x600) versions of every uploaded image
 - When set to `false`, only custom resolutions specified in the upload request will be generated
 - This allows for more control over storage usage and processing time in scenarios where default resolutions aren't needed
+
+**Maximum dimensions:**
+Maximum dimensions for requested custom resolutions are controlled by `IMAGE_MAX_WIDTH` and `IMAGE_MAX_HEIGHT` (defaults: 4096x4096). Requests exceeding these limits are rejected during validation and processing. For safety, the service also enforces a hard upper bound of 8192 per side.
+
+**Cache Type Options:**
+- `redis` (default): Uses Redis for both metadata storage and caching. Requires Redis server.
+- `badger`: Uses BadgerDB for both metadata storage and caching. No external dependencies, stores data in local files.
+
 
 **Resize Mode Options:**
 - `smart_fit` (default): Maintains aspect ratio, fits image within dimensions with padding if needed
@@ -195,6 +211,7 @@ https://your-domain.com/api/v1
 | `GET` | `/images/{id}/thumbnail` | Download thumbnail (150x150) | 100/min |
 | `GET` | `/images/{id}/preview` | Download preview (800x600) | 100/min |
 | `GET` | `/images/{id}/{resolution}` | Download custom resolution | 100/min |
+| `GET` | `/images/{id}/{resolution}/presigned-url` | Generate presigned URL for direct access | 50/min |
 | `GET` | `/health` | Health check | Unlimited |
 
 ### 1. Upload Image
@@ -260,7 +277,54 @@ GET /api/v1/images/{id}/info
 }
 ```
 
-### 3. Download Images
+### 3. Generate Presigned URL
+
+**Generate a temporary presigned URL for direct image access**
+
+```http
+GET /api/v1/images/{id}/{resolution}/presigned-url
+```
+
+**Path Parameters:**
+- `id` (string, required): Image UUID
+- `resolution` (string, required): Image size - `original`, `thumbnail`, `preview`, or custom resolution like `800x600`
+
+**Query Parameters:**
+- `expires_in` (integer, optional): Expiration time in seconds (default: 3600, max: 604800)
+
+**Response (200 OK):**
+```json
+{
+  "url": "https://bucket.s3.amazonaws.com/images/f47ac10b-58cc-4372-a567-0e02b2c3d479/thumbnail.jpg?X-Amz-Algorithm=...",
+  "expires_at": "2025-09-12T16:30:00Z",
+  "expires_in": 3600
+}
+```
+
+**cURL Examples:**
+
+Generate presigned URL for thumbnail (1 hour expiration):
+```bash
+curl "http://localhost:8080/api/v1/images/f47ac10b-58cc-4372-a567-0e02b2c3d479/thumbnail/presigned-url?expires_in=3600"
+```
+
+Generate presigned URL for custom resolution (24 hours expiration):
+```bash
+curl "http://localhost:8080/api/v1/images/f47ac10b-58cc-4372-a567-0e02b2c3d479/800x600/presigned-url?expires_in=86400"
+```
+
+Generate presigned URL for original image (default 1 hour expiration):
+```bash
+curl "http://localhost:8080/api/v1/images/f47ac10b-58cc-4372-a567-0e02b2c3d479/original/presigned-url"
+```
+
+**Use Cases:**
+- Client-side direct downloads without server proxy
+- Temporary sharing of images with expiration
+- Mobile app integration with direct S3 access
+- Reducing server bandwidth for large images
+
+### 4. Download Images
 
 **Download images in various resolutions**
 
@@ -282,7 +346,7 @@ GET /api/v1/images/{id}/800x600      # Custom WIDTHxHEIGHT
 - `Cache-Control`: `public, max-age=31536000, immutable`
 - Body: Binary image data
 
-### 4. Health Check
+### 5. Health Check
 
 **Check service health and dependencies**
 
@@ -359,6 +423,8 @@ RESIZR uses environment variables for configuration following the [12-Factor App
 - `MAX_FILE_SIZE` (default: `10485760`): Maximum file size in bytes (10MB)
 - `IMAGE_QUALITY` (default: `85`): JPEG compression quality (1-100)
 - `CACHE_TTL` (default: `3600`): Cache TTL in seconds
+- `IMAGE_MAX_WIDTH` (default: `4096`): Max allowed width for requested/custom resolutions
+- `IMAGE_MAX_HEIGHT` (default: `4096`): Max allowed height for requested/custom resolutions
 
 #### Rate Limiting Configuration
 - `RATE_LIMIT_UPLOAD` (default: `10`): Upload requests per minute per IP

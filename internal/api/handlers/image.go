@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"resizr/internal/config"
 	"resizr/internal/models"
@@ -220,6 +221,122 @@ func (h *ImageHandler) DownloadCustomResolution(c *gin.Context) {
 	h.downloadImage(c, resolution)
 }
 
+// GeneratePresignedURL generates a pre-signed URL for image access
+// GET /api/v1/images/:id/:resolution/presigned-url
+func (h *ImageHandler) GeneratePresignedURL(c *gin.Context) {
+	ctx := c.Request.Context()
+	requestID := c.GetString("request_id")
+	imageID := c.Param("id")
+
+	// Get resolution from URL path
+	size := c.Param("resolution")
+
+	// Handle predefined resolutions by detecting URL patterns
+	fullPath := c.FullPath()
+	if strings.Contains(fullPath, "/original/presigned-url") {
+		size = "original"
+	} else if strings.Contains(fullPath, "/thumbnail/presigned-url") {
+		size = "thumbnail"
+	} else if strings.Contains(fullPath, "/preview/presigned-url") {
+		size = "preview"
+	}
+
+	// Get optional expires_in parameter (default: 1 hour)
+	expiresInParam := c.Query("expires_in")
+	expiresIn := 3600 // default: 1 hour
+	if expiresInParam != "" {
+		parsed, err := strconv.Atoi(expiresInParam)
+		if err != nil || parsed <= 0 {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse{
+				Error:   "Invalid expires_in parameter",
+				Message: "expires_in must be a positive integer (seconds)",
+				Code:    http.StatusBadRequest,
+			})
+			return
+		}
+		expiresIn = parsed
+	}
+
+	// Validate maximum expiration (7 days)
+	maxExpiresIn := 7 * 24 * 3600 // 7 days in seconds
+	if expiresIn > maxExpiresIn {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "expires_in too large",
+			Message: fmt.Sprintf("Maximum expiration is %d seconds (7 days)", maxExpiresIn),
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	logger.DebugWithContext(ctx, "Generating presigned URL",
+		zap.String("image_id", imageID),
+		zap.String("size", size),
+		zap.Int("expires_in", expiresIn),
+		zap.String("request_id", requestID))
+
+	// Validate UUID format
+	if !h.isValidUUID(imageID) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Invalid image ID",
+			Message: "Image ID must be a valid UUID",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	// Validate size format
+	if !h.isValidSize(size) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Invalid size parameter",
+			Message: "Size must be 'original', 'thumbnail', 'preview', or format WIDTHxHEIGHT (e.g., 800x600)",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	// Get image metadata to verify image exists
+	metadata, err := h.imageService.GetMetadata(ctx, imageID)
+	if err != nil {
+		h.handleServiceError(c, err, requestID, "get metadata for presigned URL failed")
+		return
+	}
+
+	// Validate size exists (except for original)
+	if size != "original" && !metadata.HasResolution(size) {
+		c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error:   "Resolution not found",
+			Message: fmt.Sprintf("Resolution '%s' not available for this image", size),
+			Code:    http.StatusNotFound,
+		})
+		return
+	}
+
+	// Generate storage key and presigned URL
+	storageKey := metadata.GetStorageKey(size)
+	duration := time.Duration(expiresIn) * time.Second
+
+	presignedURL, err := h.imageService.GeneratePresignedURL(ctx, storageKey, duration)
+	if err != nil {
+		h.handleServiceError(c, err, requestID, "generate presigned URL failed")
+		return
+	}
+
+	expiresAt := time.Now().Add(duration)
+
+	logger.InfoWithContext(ctx, "Presigned URL generated successfully",
+		zap.String("image_id", imageID),
+		zap.String("size", size),
+		zap.Int("expires_in", expiresIn),
+		zap.Time("expires_at", expiresAt),
+		zap.String("request_id", requestID))
+
+	c.JSON(http.StatusOK, models.PresignedURLResponse{
+		URL:       presignedURL,
+		ExpiresAt: expiresAt,
+		ExpiresIn: expiresIn,
+	})
+}
+
 // downloadImage is a common handler for all image downloads
 func (h *ImageHandler) downloadImage(c *gin.Context, resolution string) {
 	ctx := c.Request.Context()
@@ -404,4 +521,14 @@ func (h *ImageHandler) isValidCustomResolution(resolution string) bool {
 	}
 
 	return true
+}
+
+func (h *ImageHandler) isValidSize(size string) bool {
+	// Check predefined sizes
+	if size == "original" || size == "thumbnail" || size == "preview" {
+		return true
+	}
+
+	// Check custom resolution format
+	return h.isValidCustomResolution(size)
 }

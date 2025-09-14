@@ -54,14 +54,14 @@ type CacheRepository interface {
 	// DeleteAllCachedURLs removes all cached URLs for an image
 	DeleteAllCachedURLs(ctx context.Context, imageID string) error
 
-	// Set stores any value in cache with TTL
-	Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error
+	// SetCache stores any value in cache with TTL
+	SetCache(ctx context.Context, key string, value interface{}, ttl time.Duration) error
 
-	// Get retrieves any value from cache
-	Get(ctx context.Context, key string) (string, error)
+	// GetCache retrieves any value from cache
+	GetCache(ctx context.Context, key string) (string, error)
 
-	// Delete removes any value from cache
-	Delete(ctx context.Context, key string) error
+	// DeleteCache removes any value from cache
+	DeleteCache(ctx context.Context, key string) error
 }
 
 // RepositoryStats represents repository statistics

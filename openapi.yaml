@@ -98,7 +98,7 @@ paths:
                     Optional array of custom resolutions to generate.
                     Format: "WIDTHxHEIGHT" (e.g., ["800x600", "1200x900"])
                     Supports multiple form fields or comma-separated values in a single field.
-                    Maximum dimension: 10,000 pixels
+                    Maximum dimension (hard cap): 8,192 pixels. Default is 4,096 and configurable via IMAGE_MAX_WIDTH and IMAGE_MAX_HEIGHT up to the hard cap.
                   example: ["800x600", "1200x900"]
             encoding:
               image:
@@ -198,6 +198,75 @@ paths:
                   height: 1080
                 available_resolutions: ["original", "thumbnail", "preview", "800x600", "1200x900"]
                 created_at: "2025-09-11T10:30:00Z"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/images/{id}/{resolution}/presigned-url:
+    get:
+      tags:
+        - Images
+      summary: Generate presigned URL
+      description: |
+        Generate a temporary presigned URL for direct access to image files stored in S3.
+        
+        **Features:**
+        - Direct client-side access to S3 without server proxy
+        - Configurable expiration time (default: 1 hour, max: 7 days)
+        - Support for all available image resolutions
+        - Reduces server bandwidth and improves performance
+        - Consistent with existing download endpoint structure
+        
+        **Use Cases:**
+        - Mobile app integration with direct S3 access
+        - Temporary image sharing with expiration
+        - Client-side downloads for large images
+        - CDN integration and caching optimization
+        
+      operationId: generatePresignedURL
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+        - $ref: '#/components/parameters/Resolution'
+        - name: expires_in
+          in: query
+          required: false
+          description: URL expiration time in seconds (default: 3600, max: 604800)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 604800
+            default: 3600
+          example: 3600
+      responses:
+        '200':
+          description: Presigned URL generated successfully
+          headers:
+            X-Request-ID:
+              schema:
+                type: string
+                format: uuid
+              description: Unique request identifier for tracing
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+              description: CORS allowed origin
+            Access-Control-Expose-Headers:
+              schema:
+                type: string
+              description: Headers exposed to the client
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignedURLResponse'
+              example:
+                url: "https://bucket.s3.amazonaws.com/images/f47ac10b-58cc-4372-a567-0e02b2c3d479/thumbnail.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=..."
+                expires_at: "2025-09-12T16:30:00Z"
+                expires_in: 3600
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -404,7 +473,7 @@ paths:
         **Resolution Format:**
         - Must match pattern: WIDTHxHEIGHT (e.g., "800x600", "1200x900")
         - Both width and height must be positive integers
-        - Maximum dimension: 10,000 pixels
+        - Maximum dimension (hard cap): 8,192 pixels. Default is 4,096 and configurable via IMAGE_MAX_WIDTH and IMAGE_MAX_HEIGHT up to the hard cap.
         - Resolution must have been requested during upload
         
         **Processing:**
@@ -576,6 +645,16 @@ components:
       schema:
         type: string
       example: "bytes=0-1023"
+    
+    Resolution:
+      name: resolution
+      in: path
+      required: true
+      description: Image resolution/size
+      schema:
+        type: string
+        pattern: '^(original|thumbnail|preview|[1-9]\d{0,3}x[1-9]\d{0,3})$'
+      example: "thumbnail"
 
   schemas:
     UploadResponse:
@@ -644,6 +723,28 @@ components:
           format: date-time
           description: Timestamp when the image was uploaded
           example: "2025-09-11T10:30:00Z"
+
+    PresignedURLResponse:
+      type: object
+      required:
+        - url
+        - expires_at
+        - expires_in
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Presigned URL for direct access to the image
+          example: "https://bucket.s3.amazonaws.com/images/f47ac10b-58cc-4372-a567-0e02b2c3d479/thumbnail.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=..."
+        expires_at:
+          type: string
+          format: date-time
+          description: Timestamp when the presigned URL expires
+          example: "2025-09-12T16:30:00Z"
+        expires_in:
+          type: integer
+          description: URL expiration time in seconds
+          example: 3600
 
     Dimensions:
       type: object
@@ -864,7 +965,7 @@ components:
               summary: Resolution too large
               value:
                 error: "Processing failed"
-                message: "Requested resolution exceeds maximum dimension of 10,000 pixels"
+                message: "Requested resolution exceeds maximum dimension of 8,192 pixels"
                 code: 422
 
     TooManyRequests:

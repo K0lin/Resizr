@@ -56,11 +56,11 @@ func run() error {
 		zap.String("port", cfg.Server.Port),
 		zap.Bool("development", cfg.IsDevelopment()))
 
-	// Initialize repository (Redis)
-	logger.Info("Initializing Redis repository...")
-	repo, err := repository.NewRedisRepository(&cfg.Redis)
+	// Initialize repository (composite: Redis + configurable cache)
+	logger.Info("Initializing image repository...")
+	repo, err := repository.NewImageRepository(cfg)
 	if err != nil {
-		logger.Fatal("Failed to initialize Redis repository", zap.Error(err))
+		logger.Fatal("Failed to initialize image repository", zap.Error(err))
 		return fmt.Errorf("failed to initialize repository: %w", err)
 	}
 	defer func() {
@@ -77,9 +77,19 @@ func run() error {
 		return fmt.Errorf("failed to initialize storage: %w", err)
 	}
 
-	// Initialize image processor
-	logger.Info("Initializing image processor...")
-	processor := service.NewProcessorService(10000) // Max 10k pixels per dimension
+    // Initialize image processor
+    logger.Info("Initializing image processor...")
+    // Allow configuration via env (IMAGE_MAX_WIDTH/IMAGE_MAX_HEIGHT) with sensible defaults
+    maxW := cfg.Image.MaxWidth
+    maxH := cfg.Image.MaxHeight
+    // Hard cap at 8192 to prevent excessive memory usage even if misconfigured
+    if maxW <= 0 || maxW > 8192 {
+        maxW = 8192
+    }
+    if maxH <= 0 || maxH > 8192 {
+        maxH = 8192
+    }
+    processor := service.NewProcessorService(maxW, maxH)
 
 	// Initialize services
 	logger.Info("Initializing services...")

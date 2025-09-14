@@ -52,6 +52,13 @@ type InfoResponse struct {
 	CreatedAt            time.Time     `json:"created_at"`
 }
 
+// PresignedURLResponse represents the response for presigned URL endpoint
+type PresignedURLResponse struct {
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expires_at"`
+	ExpiresIn int       `json:"expires_in"` // seconds
+}
+
 // DimensionInfo represents image dimensions
 type DimensionInfo struct {
 	Width  int `json:"width"`
@@ -285,9 +292,11 @@ func ParseResolution(resolution string) (ResolutionConfig, error) {
 		return ResolutionConfig{}, fmt.Errorf("width and height must be positive")
 	}
 
-	if width > 10000 || height > 10000 {
-		return ResolutionConfig{}, fmt.Errorf("width and height cannot exceed 10000 pixels")
-	}
+    // Enforce an upper bound to prevent excessive memory usage
+    const maxDimension = 8192
+    if width > maxDimension || height > maxDimension {
+        return ResolutionConfig{}, fmt.Errorf("width and height cannot exceed %d pixels", maxDimension)
+    }
 
 	return ResolutionConfig{Width: width, Height: height}, nil
 }

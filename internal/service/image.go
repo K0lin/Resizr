@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"resizr/internal/config"
 	"resizr/internal/models"
@@ -330,6 +331,31 @@ func (s *ImageServiceImpl) ListImages(ctx context.Context, offset, limit int) ([
 	return images, total, nil
 }
 
+// GeneratePresignedURL generates a pre-signed URL for direct access to storage
+func (s *ImageServiceImpl) GeneratePresignedURL(ctx context.Context, storageKey string, duration time.Duration) (string, error) {
+	logger.DebugWithContext(ctx, "Generating presigned URL",
+		zap.String("storage_key", storageKey),
+		zap.Duration("duration", duration))
+
+	presignedURL, err := s.storage.GeneratePresignedURL(ctx, storageKey, duration)
+	if err != nil {
+		logger.ErrorWithContext(ctx, "Failed to generate presigned URL",
+			zap.String("storage_key", storageKey),
+			zap.Error(err))
+		return "", models.StorageError{
+			Operation: "generate_presigned_url",
+			Backend:   "S3",
+			Reason:    err.Error(),
+		}
+	}
+
+	logger.InfoWithContext(ctx, "Presigned URL generated successfully",
+		zap.String("storage_key", storageKey),
+		zap.Duration("duration", duration))
+
+	return presignedURL, nil
+}
+
 // Helper methods
 
 // validateUploadInput validates the upload input
@@ -365,15 +391,23 @@ func (s *ImageServiceImpl) validateUploadInput(input UploadInput) error {
 			if res == "" {
 				continue // Skip empty strings
 			}
-			if _, err := models.ParseResolution(res); err != nil {
-				return models.ValidationError{
-					Field:   "resolutions",
-					Message: fmt.Sprintf("Invalid resolution format '%s': %s", res, err.Error()),
-				}
-			}
-			validatedResolutions = append(validatedResolutions, res)
-		}
-	}
+            if rc, err := models.ParseResolution(res); err != nil {
+                return models.ValidationError{
+                    Field:   "resolutions",
+                    Message: fmt.Sprintf("Invalid resolution format '%s': %s", res, err.Error()),
+                }
+            } else {
+                // Enforce configured maximums for requested resolutions
+                if rc.Width > s.config.Image.MaxWidth || rc.Height > s.config.Image.MaxHeight {
+                    return models.ValidationError{
+                        Field:   "resolutions",
+                        Message: fmt.Sprintf("Requested resolution '%s' exceeds maximum configured %dx%d", res, s.config.Image.MaxWidth, s.config.Image.MaxHeight),
+                    }
+                }
+            }
+            validatedResolutions = append(validatedResolutions, res)
+        }
+    }
 	// Update input with parsed resolutions
 	input.Resolutions = validatedResolutions
 
