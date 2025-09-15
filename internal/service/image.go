@@ -427,11 +427,12 @@ func (s *ImageServiceImpl) processResolution(ctx context.Context, imageID, resol
 
 	// Configure resize parameters
 	resizeConfig := ResizeConfig{
-		Width:   resolutionConfig.Width,
-		Height:  resolutionConfig.Height,
-		Quality: s.config.Image.Quality,
-		Format:  mimeType,
-		Mode:    ResizeMode(s.config.Image.ResizeMode),
+		Width:           resolutionConfig.Width,
+		Height:          resolutionConfig.Height,
+		Quality:         s.config.Image.Quality,
+		Format:          mimeType,
+		Mode:            ResizeMode(s.config.Image.ResizeMode),
+		BackgroundColor: s.config.Canvas.BackgroundColor,
 	}
 
 	// Process the image

@@ -122,6 +122,9 @@ CORS_ENABLED=true            # Enable/disable CORS middleware entirely
 CORS_ALLOW_ALL_ORIGINS=false # Allow all origins (*) - use with caution
 CORS_ALLOWED_ORIGINS=https://domain.com,https://example.com
 CORS_ALLOW_CREDENTIALS=false # Allow credentials in CORS requests
+
+# Canvas Configuration
+BACKGROUND_COLOR="#000000" # Canvas background color setup
 ```
 
 **Note on Resolution Processing:**
@@ -434,6 +437,9 @@ RESIZR uses environment variables for configuration following the [12-Factor App
 - `CORS_ALLOWED_ORIGINS` (default: `*`): Comma-separated list of allowed origins
 - `CORS_ALLOW_CREDENTIALS` (default: `false`): Allow credentials in CORS requests
 
+#### Canvase Configuration
+- `BACKGROUND_COLOR` (default: `#000000`(black)): Set up custom color of the background
+
 ### Configuration Examples
 
 #### Development Environment
@@ -477,6 +483,9 @@ CORS_ENABLED=true            # CORS enabled for frontend development
 CORS_ALLOW_ALL_ORIGINS=true  # Allow all origins in development
 CORS_ALLOWED_ORIGINS=*       # Not used when CORS_ALLOW_ALL_ORIGINS=true
 CORS_ALLOW_CREDENTIALS=false # Standard setting
+
+# Canvas Configuration
+BACKGROUND_COLOR=   # Default canvas background color - black
 ```
 
 #### Production Environment
@@ -520,6 +529,9 @@ CORS_ENABLED=true            # CORS enabled for frontend access
 CORS_ALLOW_ALL_ORIGINS=false # Restrict origins for security
 CORS_ALLOWED_ORIGINS=https://resizr.dev,https://app.resizr.dev  # Only allowed production domains
 CORS_ALLOW_CREDENTIALS=false # No credentials for security
+
+# Canvas Configuration
+BACKGROUND_COLOR="#cd738f"  # Custom color for the canvas background
 ```
 
 ---

@@ -17,6 +17,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.19.6
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.88.1
 	github.com/go-redis/redis/v8 v8.11.5
+	github.com/icza/gox v0.2.0
 	github.com/joho/godotenv v1.5.1
 	golang.org/x/time v0.13.0
 )
