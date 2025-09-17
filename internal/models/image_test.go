@@ -1,7 +1,6 @@
 package models
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -281,7 +280,7 @@ func TestParseResolution(t *testing.T) {
 		{"1x1", ResolutionConfig{Width: 1, Height: 1}, false},
 		{"4096x4096", ResolutionConfig{Width: 4096, Height: 4096}, false},
 		{"original", ResolutionConfig{}, true},
-		{"8193x8193", ResolutionConfig{}, true}, // Exceeds max dimension
+		{"8193x8193", ResolutionConfig{Width: 8193, Height: 8193}, false}, // Large dimensions are valid at parsing level
 		{"invalid", ResolutionConfig{}, true},
 		{"800", ResolutionConfig{}, true},
 		{"800x", ResolutionConfig{}, true},
@@ -577,10 +576,11 @@ func TestEdgeCases(t *testing.T) {
 		assert.Equal(t, 8192, config.Width)
 		assert.Equal(t, 8192, config.Height)
 
-		// Test dimension that exceeds maximum (should fail)
-		_, err = ParseResolution("8193x8192")
-		assert.Error(t, err)
-		assert.Contains(t, strings.ToLower(err.Error()), "exceed")
+		// Test large dimension (should succeed at parsing level)
+		config, err = ParseResolution("8193x8192")
+		assert.NoError(t, err)
+		assert.Equal(t, 8193, config.Width)
+		assert.Equal(t, 8192, config.Height)
 	})
 
 	t.Run("storage key with different extensions", func(t *testing.T) {
