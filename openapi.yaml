@@ -233,7 +233,7 @@ paths:
         - name: expires_in
           in: query
           required: false
-          description: URL expiration time in seconds (default: 3600, max: 604800)
+          description: "URL expiration time in seconds (default: 3600, max: 604800)"
           schema:
             type: integer
             minimum: 1
