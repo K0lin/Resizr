@@ -135,6 +135,9 @@ func TestHealthService_CheckHealth_AllHealthy(t *testing.T) {
 	service := NewHealthService(mockRepo, mockStorage, "1.0.0")
 	ctx := context.Background()
 
+	// Sleep briefly to ensure uptime > 0
+	time.Sleep(1 * time.Millisecond)
+
 	status, err := service.CheckHealth(ctx)
 
 	assert.NoError(t, err)
@@ -237,6 +240,9 @@ func TestHealthService_GetMetrics_Success(t *testing.T) {
 
 	service := NewHealthService(mockRepo, mockStorage, "1.0.0")
 	ctx := context.Background()
+
+	// Sleep briefly to ensure uptime > 0
+	time.Sleep(1 * time.Millisecond)
 
 	metrics, err := service.GetMetrics(ctx)
 

@@ -36,29 +36,24 @@ func TestRateLimit_Upload(t *testing.T) {
 	globalRateLimiter = nil
 	once = sync.Once{}
 
-	// First request should succeed
-	req := httptest.NewRequest("POST", "/api/v1/images", nil)
-	req.RemoteAddr = "192.168.1.1:12345"
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
+	// Multiple requests within burst should succeed
+	for i := 0; i < 4; i++ { // Burst is 2x rate = 4
+		req := httptest.NewRequest("POST", "/api/v1/images", nil)
+		req.RemoteAddr = "192.168.1.1:12345"
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, "Request %d should succeed", i+1)
+	}
 
-	// Second request should succeed (within burst)
-	req2 := httptest.NewRequest("POST", "/api/v1/images", nil)
-	req2.RemoteAddr = "192.168.1.1:12345"
-	w2 := httptest.NewRecorder()
-	router.ServeHTTP(w2, req2)
-	assert.Equal(t, http.StatusOK, w2.Code)
-
-	// Third request should be rate limited
-	req3 := httptest.NewRequest("POST", "/api/v1/images", nil)
-	req3.RemoteAddr = "192.168.1.1:12345"
-	w3 := httptest.NewRecorder()
-	router.ServeHTTP(w3, req3)
-	assert.Equal(t, http.StatusTooManyRequests, w3.Code)
+	// Fifth request should be rate limited
+	req5 := httptest.NewRequest("POST", "/api/v1/images", nil)
+	req5.RemoteAddr = "192.168.1.1:12345"
+	w5 := httptest.NewRecorder()
+	router.ServeHTTP(w5, req5)
+	assert.Equal(t, http.StatusTooManyRequests, w5.Code)
 
 	var response map[string]interface{}
-	err := testutil.ParseJSONResponse(w3, &response)
+	err := testutil.ParseJSONResponse(w5, &response)
 	assert.NoError(t, err)
 	assert.Equal(t, "Rate limit exceeded", response["error"])
 	assert.Contains(t, response["message"], "Too many requests")
@@ -323,7 +318,7 @@ func TestRateLimiter_GetLimiter(t *testing.T) {
 	// Test creating new limiter
 	limiter1 := rl.getLimiter("key1", 10)
 	assert.NotNil(t, limiter1)
-	assert.Equal(t, 10, limiter1.Burst()) // Burst equals rate
+	assert.Equal(t, 20, limiter1.Burst()) // Burst is 2x rate
 
 	// Test getting existing limiter
 	limiter2 := rl.getLimiter("key1", 10)
@@ -331,7 +326,9 @@ func TestRateLimiter_GetLimiter(t *testing.T) {
 
 	// Test different key creates different limiter
 	limiter3 := rl.getLimiter("key2", 10)
-	assert.NotEqual(t, limiter1, limiter3)
+
+	// They should be different object instances (not the same pointer)
+	assert.NotSame(t, limiter1, limiter3, "limiters should be different objects")
 }
 
 func TestRateLimiter_Cleanup(t *testing.T) {
