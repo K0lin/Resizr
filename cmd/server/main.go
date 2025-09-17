@@ -94,7 +94,7 @@ func run() error {
 	// Initialize services
 	logger.Info("Initializing services...")
 	imageService := service.NewImageService(repo, store, processor, cfg)
-	healthService := service.NewHealthService(repo, store, AppVersion)
+	healthService := service.NewHealthService(repo, store, cfg, AppVersion)
 
 	// Initialize API router
 	logger.Info("Initializing API router...")

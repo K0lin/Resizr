@@ -11,6 +11,7 @@ import (
 	"resizr/internal/models"
 	"resizr/internal/repository"
 	"resizr/internal/storage"
+	"resizr/internal/testutil"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -107,7 +108,7 @@ func TestNewHealthService(t *testing.T) {
 	mockStorage := &mockStorageProvider{}
 	version := "1.0.0"
 
-	service := NewHealthService(mockRepo, mockStorage, version)
+	service := NewHealthService(mockRepo, mockStorage, testutil.TestConfig(), version)
 
 	assert.NotNil(t, service)
 
@@ -132,7 +133,7 @@ func TestHealthService_CheckHealth_AllHealthy(t *testing.T) {
 		},
 	}
 
-	service := NewHealthService(mockRepo, mockStorage, "1.0.0")
+	service := NewHealthService(mockRepo, mockStorage, testutil.TestConfig(), "1.0.0")
 	ctx := context.Background()
 
 	// Sleep briefly to ensure uptime > 0
@@ -162,7 +163,7 @@ func TestHealthService_CheckHealth_RedisUnhealthy(t *testing.T) {
 		},
 	}
 
-	service := NewHealthService(mockRepo, mockStorage, "1.0.0")
+	service := NewHealthService(mockRepo, mockStorage, testutil.TestConfig(), "1.0.0")
 	ctx := context.Background()
 
 	status, err := service.CheckHealth(ctx)
@@ -187,7 +188,7 @@ func TestHealthService_CheckHealth_S3Unhealthy(t *testing.T) {
 		},
 	}
 
-	service := NewHealthService(mockRepo, mockStorage, "1.0.0")
+	service := NewHealthService(mockRepo, mockStorage, testutil.TestConfig(), "1.0.0")
 	ctx := context.Background()
 
 	status, err := service.CheckHealth(ctx)
@@ -214,7 +215,7 @@ func TestHealthService_CheckHealth_AllUnhealthy(t *testing.T) {
 		},
 	}
 
-	service := NewHealthService(mockRepo, mockStorage, "1.0.0")
+	service := NewHealthService(mockRepo, mockStorage, testutil.TestConfig(), "1.0.0")
 	ctx := context.Background()
 
 	status, err := service.CheckHealth(ctx)
@@ -238,7 +239,7 @@ func TestHealthService_GetMetrics_Success(t *testing.T) {
 	}
 	mockStorage := &mockStorageProvider{}
 
-	service := NewHealthService(mockRepo, mockStorage, "1.0.0")
+	service := NewHealthService(mockRepo, mockStorage, testutil.TestConfig(), "1.0.0")
 	ctx := context.Background()
 
 	// Sleep briefly to ensure uptime > 0
@@ -284,7 +285,7 @@ func TestHealthService_GetMetrics_RepositoryStatsError(t *testing.T) {
 	}
 	mockStorage := &mockStorageProvider{}
 
-	service := NewHealthService(mockRepo, mockStorage, "1.0.0")
+	service := NewHealthService(mockRepo, mockStorage, testutil.TestConfig(), "1.0.0")
 	ctx := context.Background()
 
 	metrics, err := service.GetMetrics(ctx)
@@ -309,7 +310,7 @@ func TestHealthService_Uptime(t *testing.T) {
 		healthFunc: func(ctx context.Context) error { return nil },
 	}
 
-	service := NewHealthService(mockRepo, mockStorage, "1.0.0")
+	service := NewHealthService(mockRepo, mockStorage, testutil.TestConfig(), "1.0.0")
 
 	// Wait a small amount of time to ensure uptime > 0
 	time.Sleep(10 * time.Millisecond)
@@ -346,7 +347,7 @@ func TestHealthService_Context_Cancellation(t *testing.T) {
 		},
 	}
 
-	service := NewHealthService(mockRepo, mockStorage, "1.0.0")
+	service := NewHealthService(mockRepo, mockStorage, testutil.TestConfig(), "1.0.0")
 
 	// Create context with short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
@@ -377,7 +378,7 @@ func TestHealthService_MultipleChecks(t *testing.T) {
 		},
 	}
 
-	service := NewHealthService(mockRepo, mockStorage, "1.0.0")
+	service := NewHealthService(mockRepo, mockStorage, testutil.TestConfig(), "1.0.0")
 	ctx := context.Background()
 
 	// First call - should succeed
@@ -400,7 +401,7 @@ func TestHealthService_MemoryMetrics(t *testing.T) {
 	mockRepo := &mockImageRepository{}
 	mockStorage := &mockStorageProvider{}
 
-	service := NewHealthService(mockRepo, mockStorage, "1.0.0")
+	service := NewHealthService(mockRepo, mockStorage, testutil.TestConfig(), "1.0.0")
 	ctx := context.Background()
 
 	metrics, err := service.GetMetrics(ctx)
@@ -438,7 +439,7 @@ func TestHealthService_Version(t *testing.T) {
 				healthFunc: func(ctx context.Context) error { return nil },
 			}
 
-			service := NewHealthService(mockRepo, mockStorage, version)
+			service := NewHealthService(mockRepo, mockStorage, testutil.TestConfig(), version)
 			ctx := context.Background()
 
 			status, err := service.CheckHealth(ctx)
@@ -492,4 +493,147 @@ func TestHealthStatus_Struct(t *testing.T) {
 	assert.Equal(t, "connected", status.Services["s3"])
 	assert.Equal(t, int64(3600), status.Uptime)
 	assert.Equal(t, "1.2.3", status.Version)
+}
+
+func TestHealthService_S3CacheConfiguration(t *testing.T) {
+	tests := []struct {
+		name              string
+		s3ChecksDisabled  bool
+		s3ChecksInterval  time.Duration
+		expectedS3Checked bool
+		description       string
+	}{
+		{
+			name:              "S3 checks enabled",
+			s3ChecksDisabled:  false,
+			s3ChecksInterval:  30 * time.Second,
+			expectedS3Checked: true,
+			description:       "When S3 checks are enabled, S3 should be checked",
+		},
+		{
+			name:              "S3 checks disabled",
+			s3ChecksDisabled:  true,
+			s3ChecksInterval:  30 * time.Second,
+			expectedS3Checked: false,
+			description:       "When S3 checks are disabled, S3 should not be checked to save API costs",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create config with specific health check settings
+			config := testutil.TestConfig()
+			config.Health.S3ChecksDisabled = tt.s3ChecksDisabled
+			config.Health.S3ChecksInterval = tt.s3ChecksInterval
+
+			var s3CheckCalled bool
+			mockStorage := &mockStorageProvider{
+				healthFunc: func(ctx context.Context) error {
+					s3CheckCalled = true
+					return nil
+				},
+			}
+
+			mockRepo := &mockImageRepository{
+				healthFunc: func(ctx context.Context) error {
+					return nil
+				},
+			}
+
+			service := NewHealthService(mockRepo, mockStorage, config, "1.0.0")
+
+			ctx := context.Background()
+			_, err := service.CheckHealth(ctx)
+			assert.NoError(t, err)
+
+			assert.Equal(t, tt.expectedS3Checked, s3CheckCalled, tt.description)
+		})
+	}
+}
+
+func TestHealthService_S3CachingBehavior(t *testing.T) {
+	// Create config with short caching interval for testing
+	config := testutil.TestConfig()
+	config.Health.S3ChecksDisabled = false
+	config.Health.S3ChecksInterval = 100 * time.Millisecond // Short interval for testing
+
+	var s3CheckCount int
+	mockStorage := &mockStorageProvider{
+		healthFunc: func(ctx context.Context) error {
+			s3CheckCount++
+			return nil
+		},
+	}
+
+	mockRepo := &mockImageRepository{
+		healthFunc: func(ctx context.Context) error {
+			return nil
+		},
+	}
+
+	service := NewHealthService(mockRepo, mockStorage, config, "1.0.0")
+	ctx := context.Background()
+
+	// First check should call S3
+	_, err := service.CheckHealth(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, s3CheckCount, "First check should call S3")
+
+	// Immediate second check should use cache
+	_, err = service.CheckHealth(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, s3CheckCount, "Second check should use cached result")
+
+	// Wait for cache to expire
+	time.Sleep(150 * time.Millisecond)
+
+	// Third check should call S3 again
+	_, err = service.CheckHealth(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, s3CheckCount, "Third check after cache expiry should call S3 again")
+}
+
+func TestHealthService_S3ErrorCaching(t *testing.T) {
+	// Create config with short caching interval for testing
+	config := testutil.TestConfig()
+	config.Health.S3ChecksDisabled = false
+	config.Health.S3ChecksInterval = 100 * time.Millisecond
+
+	var s3CheckCount int
+	mockStorage := &mockStorageProvider{
+		healthFunc: func(ctx context.Context) error {
+			s3CheckCount++
+			return errors.New("S3 connection failed")
+		},
+	}
+
+	mockRepo := &mockImageRepository{
+		healthFunc: func(ctx context.Context) error {
+			return nil
+		},
+	}
+
+	service := NewHealthService(mockRepo, mockStorage, config, "1.0.0")
+	ctx := context.Background()
+
+	// First check should call S3 and cache the error
+	status, err := service.CheckHealth(ctx)
+	assert.NoError(t, err) // Service should not fail overall
+	assert.Contains(t, status.Services["s3"], "unhealthy: S3 connection failed")
+	assert.Equal(t, 1, s3CheckCount, "First check should call S3")
+
+	// Immediate second check should use cached error result
+	status, err = service.CheckHealth(ctx)
+	assert.NoError(t, err)
+	assert.Contains(t, status.Services["s3"], "unhealthy: S3 connection failed")
+	assert.Equal(t, 1, s3CheckCount, "Second check should use cached error result")
+
+	// Wait for cache to expire
+	time.Sleep(150 * time.Millisecond)
+
+	// Third check should call S3 again
+	status, err = service.CheckHealth(ctx)
+	assert.NoError(t, err)
+	assert.Contains(t, status.Services["s3"], "unhealthy: S3 connection failed")
+	assert.Equal(t, 2, s3CheckCount, "Third check after cache expiry should call S3 again")
 }
