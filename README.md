@@ -96,6 +96,11 @@ RATE_LIMIT_UPLOAD=10         # Upload endpoint rate limit per IP
 RATE_LIMIT_DOWNLOAD=100      # Download endpoint rate limit per IP  
 RATE_LIMIT_INFO=50           # Info endpoint rate limit per IP
 
+# Health Check Configuration
+S3_HEALTHCHECKS_DISABLE=false # Disable S3 health checks to reduce API calls (default: false)
+S3_HEALTHCHECKS_INTERVAL=30    # Interval between S3 health checks in seconds (default: 30s, minimum: 10s)
+HEALTHCHECK_INTERVAL=30        # Docker health check interval in seconds (minimum: 10s)
+
 # CORS Configuration
 CORS_ENABLED=true            # Enable/disable CORS middleware entirely
 CORS_ALLOW_ALL_ORIGINS=false # Allow all origins (*) - use with caution
@@ -214,6 +219,11 @@ RESIZR uses environment variables for configuration.
 - `IMAGE_QUALITY`: JPEG quality (1-100)
 - `RESIZE_MODE`: smart_fit/crop/stretch
 
+### Health Check Configuration
+- `S3_HEALTHCHECKS_DISABLE`: Disable S3 health checks to reduce API calls (default: false)
+- `S3_HEALTHCHECKS_INTERVAL`: Interval between S3 health checks in seconds (default: 30s, minimum: 10s)
+- `HEALTHCHECK_INTERVAL`: Docker health check interval in seconds (minimum: 10s)
+
 ### Limits
 - `RATE_LIMIT_UPLOAD`: Upload rate limit per IP
 - `RATE_LIMIT_DOWNLOAD`: Download rate limit per IP
@@ -221,7 +231,79 @@ RESIZR uses environment variables for configuration.
 
 ---
 
-## � Deployment
+## 🏥 Health Check Optimization
+
+RESIZR includes advanced health check configuration to optimize production deployments and reduce cloud costs.
+
+### Smart Health Check Features
+
+- **Configurable S3 Health Checks**: Reduce expensive S3 API calls by disabling or adjusting health check frequency
+- **Intelligent Caching**: Health check results are cached to prevent redundant API calls
+- **Minimum Interval Protection**: Enforces a 10-second minimum interval to prevent excessive checking
+- **Docker Integration**: Smart health check script that respects configuration settings
+
+### Configuration Options
+
+#### S3_HEALTHCHECKS_DISABLE
+```env
+S3_HEALTHCHECKS_DISABLE=false  # Default: false
+```
+- `false`: Health checks include S3 connectivity validation
+- `true`: Skip S3 health checks entirely, reducing S3 API costs
+
+#### S3_HEALTHCHECKS_INTERVAL
+```env
+S3_HEALTHCHECKS_INTERVAL=30  # Default: 30 seconds, minimum: 10 seconds
+```
+Controls how frequently S3 health checks are performed when enabled:
+- Values below 10 seconds are automatically adjusted to 10 seconds
+- Higher values reduce S3 API calls but may delay detection of S3 issues
+- Recommended: 30-60 seconds for production environments
+
+#### HEALTHCHECK_INTERVAL
+```env
+HEALTHCHECK_INTERVAL=30  # Default: 30 seconds, minimum: 10 seconds
+```
+Docker-specific health check interval:
+- Used by the Docker health check script
+- Overrides Docker Compose/Dockerfile interval settings
+- Values below 10 seconds are automatically adjusted to 10 seconds
+
+### Cost Optimization Benefits
+
+**Without Optimization (default Docker health check every 30s):**
+- S3 API calls: ~2,880 per day per container
+- Estimated cost: $0.01-0.02 per day for S3 requests (varies by region)
+
+**With Optimization (S3_HEALTHCHECKS_INTERVAL=300, S3 checks every 5 minutes):**
+- S3 API calls: ~288 per day per container
+- Cost reduction: 90% fewer S3 API calls
+- Maintains service health monitoring with Redis/application checks every 30s
+
+**Production Recommendation:**
+```env
+# For cost-sensitive production environments
+S3_HEALTHCHECKS_DISABLE=false
+S3_HEALTHCHECKS_INTERVAL=300        # Check S3 every 5 minutes
+HEALTHCHECK_INTERVAL=30             # Check service health every 30 seconds
+
+# For high-availability production environments
+S3_HEALTHCHECKS_DISABLE=false
+S3_HEALTHCHECKS_INTERVAL=60         # Check S3 every minute
+HEALTHCHECK_INTERVAL=30             # Check service health every 30 seconds
+```
+
+### Docker Health Check Script
+
+RESIZR includes a smart health check script (`healthcheck.sh`) that:
+- Respects `S3_HEALTHCHECKS_DISABLE` and `S3_HEALTHCHECKS_INTERVAL` settings
+- Provides detailed logging for troubleshooting
+- Enforces minimum interval limits
+- Falls back gracefully if configuration is missing
+
+---
+
+## 🐳 Deployment
 
 ### Docker
 
@@ -250,6 +332,10 @@ services:
     - RATE_LIMIT_UPLOAD=100         # Upload endpoint rate limit per IP
     - RATE_LIMIT_DOWNLOAD=100      # Download endpoint rate limit per IP
     - RATE_LIMIT_INFO=50           # Info endpoint rate limit per IP
+    # Health Check Configuration for cost optimization
+    - S3_HEALTHCHECKS_DISABLE=false # Disable S3 health checks to reduce API costs
+    - S3_HEALTHCHECKS_INTERVAL=30   # S3 health check interval in seconds (minimum: 10s)
+    - HEALTHCHECK_INTERVAL=30       # Docker health check interval in seconds (minimum: 10s)
    volumes:
     - ./badger-data:/data/badger
 ```

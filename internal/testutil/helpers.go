@@ -130,6 +130,11 @@ func TestConfig() *config.Config {
 			Level:  "debug",
 			Format: "console",
 		},
+		Health: config.HealthConfig{
+			S3ChecksDisabled: false,
+			S3ChecksInterval: 30 * time.Second,
+			CheckInterval:    30 * time.Second,
+		},
 	}
 }
 

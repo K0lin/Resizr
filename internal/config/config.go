@@ -21,6 +21,7 @@ type Config struct {
 	Logger    LoggerConfig
 	CORS      CORSConfig
 	Canvas    CanvasConfig
+	Health    HealthConfig
 }
 
 // ServerConfig holds HTTP server configuration
@@ -104,6 +105,13 @@ type CanvasConfig struct {
 	BackgroundColor string
 }
 
+// HealthConfig holds health check configuration
+type HealthConfig struct {
+	S3ChecksDisabled bool          // Disable S3 health checks to reduce API calls
+	S3ChecksInterval time.Duration // Interval for caching S3 health check results
+	CheckInterval    time.Duration // Docker health check interval (minimum 10s)
+}
+
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
 	// Load .env file if it exists (for development)
@@ -165,6 +173,11 @@ func Load() (*Config, error) {
 		},
 		Canvas: CanvasConfig{
 			BackgroundColor: getEnv("BACKGROUND_COLOR", "#000000"),
+		},
+		Health: HealthConfig{
+			S3ChecksDisabled: getEnvBool("S3_HEALTHCHECKS_DISABLE", false),
+			S3ChecksInterval: getS3HealthCheckInterval(),
+			CheckInterval:    getHealthCheckInterval(),
 		},
 	}
 
@@ -341,6 +354,24 @@ func getEnvStringSlice(key string, defaultValue []string) []string {
 		}
 	}
 	return defaultValue
+}
+
+// getHealthCheckInterval returns health check interval with minimum 10s limit
+func getHealthCheckInterval() time.Duration {
+	interval := getEnvInt("HEALTHCHECK_INTERVAL", 30)
+	if interval < 10 {
+		interval = 10 // Minimum 10 seconds for health check interval
+	}
+	return time.Duration(interval) * time.Second
+}
+
+// getS3HealthCheckInterval returns S3 health check interval with minimum 10s limit
+func getS3HealthCheckInterval() time.Duration {
+	interval := getEnvInt("S3_HEALTHCHECKS_INTERVAL", 30)
+	if interval < 10 {
+		interval = 10 // Minimum 10 seconds for S3 health check interval
+	}
+	return time.Duration(interval) * time.Second
 }
 
 // contains checks if slice contains value
