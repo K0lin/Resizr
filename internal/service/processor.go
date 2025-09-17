@@ -19,23 +19,23 @@ import (
 
 // ProcessorServiceImpl implements the ProcessorService interface
 type ProcessorServiceImpl struct {
-    maxWidth  int // Maximum allowed image width
-    maxHeight int // Maximum allowed image height
+	maxWidth  int // Maximum allowed image width
+	maxHeight int // Maximum allowed image height
 }
 
 // NewProcessorService creates a new image processor service
 func NewProcessorService(maxWidth, maxHeight int) ProcessorService {
-    if maxWidth <= 0 {
-        maxWidth = 4096 // Default maximum width
-    }
-    if maxHeight <= 0 {
-        maxHeight = 4096 // Default maximum height
-    }
+	if maxWidth <= 0 {
+		maxWidth = 4096 // Default maximum width
+	}
+	if maxHeight <= 0 {
+		maxHeight = 4096 // Default maximum height
+	}
 
-    return &ProcessorServiceImpl{
-        maxWidth:  maxWidth,
-        maxHeight: maxHeight,
-    }
+	return &ProcessorServiceImpl{
+		maxWidth:  maxWidth,
+		maxHeight: maxHeight,
+	}
 }
 
 // DetectFormat detects image format from data
@@ -111,10 +111,10 @@ func (p *ProcessorServiceImpl) GetDimensions(data []byte) (width, height int, er
 		return 0, 0, fmt.Errorf("invalid image dimensions: %dx%d", width, height)
 	}
 
-    if width > p.maxWidth || height > p.maxHeight {
-        return 0, 0, fmt.Errorf("image dimensions %dx%d exceed maximum allowed %dx%d",
-            width, height, p.maxWidth, p.maxHeight)
-    }
+	if width > p.maxWidth || height > p.maxHeight {
+		return 0, 0, fmt.Errorf("image dimensions %dx%d exceed maximum allowed %dx%d",
+			width, height, p.maxWidth, p.maxHeight)
+	}
 
 	return width, height, nil
 }
@@ -138,10 +138,10 @@ func (p *ProcessorServiceImpl) ProcessImage(data []byte, config ResizeConfig) ([
 		return nil, fmt.Errorf("invalid target dimensions: %dx%d", config.Width, config.Height)
 	}
 
-    if config.Width > p.maxWidth || config.Height > p.maxHeight {
-        return nil, fmt.Errorf("target dimensions %dx%d exceed maximum allowed %dx%d",
-            config.Width, config.Height, p.maxWidth, p.maxHeight)
-    }
+	if config.Width > p.maxWidth || config.Height > p.maxHeight {
+		return nil, fmt.Errorf("target dimensions %dx%d exceed maximum allowed %dx%d",
+			config.Width, config.Height, p.maxWidth, p.maxHeight)
+	}
 
 	// Apply resize based on mode
 	var resizedImage image.Image
@@ -341,9 +341,9 @@ func (p *ProcessorServiceImpl) GetSupportedFormats() []string {
 
 // GetMaxDimension returns maximum allowed image dimension
 func (p *ProcessorServiceImpl) GetMaxDimension() int {
-    // Return the larger of the two as the overall max dimension
-    if p.maxWidth >= p.maxHeight {
-        return p.maxWidth
-    }
-    return p.maxHeight
+	// Return the larger of the two as the overall max dimension
+	if p.maxWidth >= p.maxHeight {
+		return p.maxWidth
+	}
+	return p.maxHeight
 }
