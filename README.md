@@ -235,7 +235,7 @@ docker run -p 8080:8080 --env-file .env resizr
 ```yaml
 services:
   resizr:
-   image: k0lin/resizr:latest
+   image: k0lin/resizr:dev
    restart: unless-stopped
    ports:
      - "8080:8080"
