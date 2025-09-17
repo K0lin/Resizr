@@ -197,12 +197,6 @@ func (h *ImageHandler) DownloadThumbnail(c *gin.Context) {
 	h.downloadImage(c, "thumbnail")
 }
 
-// DownloadPreview handles preview download
-// GET /api/v1/images/:id/preview
-func (h *ImageHandler) DownloadPreview(c *gin.Context) {
-	h.downloadImage(c, "preview")
-}
-
 // DownloadCustomResolution handles custom resolution download
 // GET /api/v1/images/:id/:resolution
 func (h *ImageHandler) DownloadCustomResolution(c *gin.Context) {
@@ -237,8 +231,6 @@ func (h *ImageHandler) GeneratePresignedURL(c *gin.Context) {
 		size = "original"
 	} else if strings.Contains(fullPath, "/thumbnail/presigned-url") {
 		size = "thumbnail"
-	} else if strings.Contains(fullPath, "/preview/presigned-url") {
-		size = "preview"
 	}
 
 	// Get optional expires_in parameter (default: 1 hour)
@@ -304,7 +296,7 @@ func (h *ImageHandler) GeneratePresignedURL(c *gin.Context) {
 	}
 
 	// Validate size format for custom resolutions (after checking availability)
-	if size != "original" && size != "thumbnail" && size != "preview" && !h.isValidCustomResolution(size) {
+	if size != "original" && size != "thumbnail" && !h.isValidCustomResolution(size) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Invalid size format",
 			Message: "Custom resolution must be in format WIDTHxHEIGHT (e.g., 800x600)",
@@ -527,7 +519,7 @@ func (h *ImageHandler) isValidCustomResolution(resolution string) bool {
 
 func (h *ImageHandler) isValidSize(size string) bool {
 	// Check predefined sizes
-	if size == "original" || size == "thumbnail" || size == "preview" {
+	if size == "original" || size == "thumbnail" {
 		return true
 	}
 

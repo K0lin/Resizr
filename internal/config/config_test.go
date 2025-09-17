@@ -515,7 +515,6 @@ func TestGetResolution(t *testing.T) {
 		Image: ImageConfig{
 			DefaultResolutions: map[string]ResolutionConfig{
 				"thumbnail": {Width: 150, Height: 150},
-				"preview":   {Width: 800, Height: 600},
 			},
 		},
 	}

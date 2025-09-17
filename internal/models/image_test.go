@@ -438,12 +438,12 @@ func TestResponseStructures(t *testing.T) {
 		response := UploadResponse{
 			ID:          "test-id",
 			Message:     "Success",
-			Resolutions: []string{"thumbnail", "preview"},
+			Resolutions: []string{"thumbnail", "800x600"},
 		}
 
 		assert.Equal(t, "test-id", response.ID)
 		assert.Equal(t, "Success", response.Message)
-		assert.Equal(t, []string{"thumbnail", "preview"}, response.Resolutions)
+		assert.Equal(t, []string{"thumbnail", "800x600"}, response.Resolutions)
 	})
 
 	t.Run("InfoResponse", func(t *testing.T) {
