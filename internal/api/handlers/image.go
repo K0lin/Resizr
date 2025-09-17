@@ -284,15 +284,7 @@ func (h *ImageHandler) GeneratePresignedURL(c *gin.Context) {
 		return
 	}
 
-	// Validate size format
-	if !h.isValidSize(size) {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "Invalid size parameter",
-			Message: "Size must be 'original', 'thumbnail', 'preview', or format WIDTHxHEIGHT (e.g., 800x600)",
-			Code:    http.StatusBadRequest,
-		})
-		return
-	}
+	// Note: Size format validation is done after getting metadata to allow 404 for unavailable resolutions
 
 	// Get image metadata to verify image exists
 	metadata, err := h.imageService.GetMetadata(ctx, imageID)
@@ -307,6 +299,16 @@ func (h *ImageHandler) GeneratePresignedURL(c *gin.Context) {
 			Error:   "Resolution not found",
 			Message: fmt.Sprintf("Resolution '%s' not available for this image", size),
 			Code:    http.StatusNotFound,
+		})
+		return
+	}
+
+	// Validate size format for custom resolutions (after checking availability)
+	if size != "original" && size != "thumbnail" && size != "preview" && !h.isValidCustomResolution(size) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Invalid size format",
+			Message: "Custom resolution must be in format WIDTHxHEIGHT (e.g., 800x600)",
+			Code:    http.StatusBadRequest,
 		})
 		return
 	}

@@ -61,7 +61,7 @@ func (s *HealthServiceImpl) CheckHealth(ctx context.Context) (*HealthStatus, err
 	// Add application info
 	services["application"] = "healthy"
 
-	uptime := int64(time.Since(s.startTime).Seconds())
+	uptime := time.Since(s.startTime).Milliseconds()
 
 	status := &HealthStatus{
 		Services: services,
@@ -85,11 +85,11 @@ func (s *HealthServiceImpl) GetMetrics(ctx context.Context) (map[string]interfac
 
 	metrics := map[string]interface{}{
 		"system": map[string]interface{}{
-			"uptime_seconds": int64(time.Since(s.startTime).Seconds()),
-			"version":        s.version,
-			"go_version":     runtime.Version(),
-			"goroutines":     runtime.NumGoroutine(),
-			"cpu_count":      runtime.NumCPU(),
+			"uptime_milliseconds": time.Since(s.startTime).Milliseconds(),
+			"version":             s.version,
+			"go_version":          runtime.Version(),
+			"goroutines":          runtime.NumGoroutine(),
+			"cpu_count":           runtime.NumCPU(),
 		},
 		"memory": map[string]interface{}{
 			"alloc_bytes":       memStats.Alloc,
@@ -105,7 +105,7 @@ func (s *HealthServiceImpl) GetMetrics(ctx context.Context) (map[string]interfac
 	}
 
 	// Try to get repository stats
-	if repoStats, err := s.repo.GetStats(ctx); err == nil {
+	if repoStats, err := s.repo.GetStats(ctx); err == nil && repoStats != nil {
 		metrics["repository"] = map[string]interface{}{
 			"total_images": repoStats.TotalImages,
 			"cache_hits":   repoStats.CacheHits,
