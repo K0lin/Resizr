@@ -43,11 +43,10 @@ func TestImageMetadata_GetDimensions(t *testing.T) {
 
 func TestImageMetadata_HasResolution(t *testing.T) {
 	metadata := &ImageMetadata{
-		Resolutions: []string{"thumbnail", "preview", "800x600"},
+		Resolutions: []string{"thumbnail", "800x600"},
 	}
 
 	assert.True(t, metadata.HasResolution("thumbnail"))
-	assert.True(t, metadata.HasResolution("preview"))
 	assert.True(t, metadata.HasResolution("800x600"))
 	assert.False(t, metadata.HasResolution("1200x900"))
 	assert.False(t, metadata.HasResolution(""))
@@ -61,8 +60,8 @@ func TestImageMetadata_AddResolution(t *testing.T) {
 	oldUpdatedAt := metadata.UpdatedAt
 
 	// Add new resolution
-	metadata.AddResolution("preview")
-	assert.Contains(t, metadata.Resolutions, "preview")
+	metadata.AddResolution("800x600")
+	assert.Contains(t, metadata.Resolutions, "800x600")
 	assert.True(t, metadata.UpdatedAt.After(oldUpdatedAt))
 
 	// Try to add existing resolution
@@ -104,7 +103,6 @@ func TestImageMetadata_GetStorageKey(t *testing.T) {
 	}{
 		{"original", "images/test-uuid/original.jpg"},
 		{"thumbnail", "images/test-uuid/thumbnail.jpg"},
-		{"preview", "images/test-uuid/preview.jpg"},
 		{"800x600", "images/test-uuid/800x600.jpg"},
 	}
 
@@ -122,7 +120,7 @@ func TestImageMetadata_ToInfoResponse(t *testing.T) {
 		Size:        102400,
 		Width:       1920,
 		Height:      1080,
-		Resolutions: []string{"thumbnail", "preview"},
+		Resolutions: []string{"thumbnail", "800x600"},
 		CreatedAt:   time.Date(2023, 1, 1, 12, 0, 0, 0, time.UTC),
 	}
 
@@ -136,7 +134,7 @@ func TestImageMetadata_ToInfoResponse(t *testing.T) {
 	assert.Equal(t, 1080, response.Dimensions.Height)
 	assert.Contains(t, response.AvailableResolutions, "original")
 	assert.Contains(t, response.AvailableResolutions, "thumbnail")
-	assert.Contains(t, response.AvailableResolutions, "preview")
+	assert.Contains(t, response.AvailableResolutions, "800x600")
 	assert.Equal(t, metadata.CreatedAt, response.CreatedAt)
 }
 
@@ -274,7 +272,7 @@ func TestParseResolution(t *testing.T) {
 		expectErr  bool
 	}{
 		{"thumbnail", ResolutionConfig{Width: 150, Height: 150}, false},
-		{"preview", ResolutionConfig{Width: 800, Height: 600}, false},
+
 		{"800x600", ResolutionConfig{Width: 800, Height: 600}, false},
 		{"1920x1080", ResolutionConfig{Width: 1920, Height: 1080}, false},
 		{"1x1", ResolutionConfig{Width: 1, Height: 1}, false},
@@ -440,12 +438,12 @@ func TestResponseStructures(t *testing.T) {
 		response := UploadResponse{
 			ID:          "test-id",
 			Message:     "Success",
-			Resolutions: []string{"thumbnail", "preview"},
+			Resolutions: []string{"thumbnail", "800x600"},
 		}
 
 		assert.Equal(t, "test-id", response.ID)
 		assert.Equal(t, "Success", response.Message)
-		assert.Equal(t, []string{"thumbnail", "preview"}, response.Resolutions)
+		assert.Equal(t, []string{"thumbnail", "800x600"}, response.Resolutions)
 	})
 
 	t.Run("InfoResponse", func(t *testing.T) {

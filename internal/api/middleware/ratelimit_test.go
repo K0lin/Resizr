@@ -292,7 +292,7 @@ func TestGetRateLimit(t *testing.T) {
 	}{
 		{"POST", "/api/v1/images", 10},
 		{"GET", "/api/v1/images/123/thumbnail", 100},
-		{"GET", "/api/v1/images/123/preview", 100},
+
 		{"GET", "/api/v1/images/123/original", 100},
 		{"GET", "/api/v1/images/123/info", 50},
 		{"GET", "/health", 50},

@@ -515,7 +515,6 @@ func TestGetResolution(t *testing.T) {
 		Image: ImageConfig{
 			DefaultResolutions: map[string]ResolutionConfig{
 				"thumbnail": {Width: 150, Height: 150},
-				"preview":   {Width: 800, Height: 600},
 			},
 		},
 	}
@@ -704,9 +703,124 @@ func clearEnv() {
 		"GENERATE_DEFAULT_RESOLUTIONS", "RESIZE_MODE", "IMAGE_MAX_WIDTH", "IMAGE_MAX_HEIGHT",
 		"RATE_LIMIT_UPLOAD", "RATE_LIMIT_DOWNLOAD", "RATE_LIMIT_INFO", "LOG_LEVEL", "LOG_FORMAT",
 		"CORS_ENABLED", "CORS_ALLOW_ALL_ORIGINS", "CORS_ALLOWED_ORIGINS", "CORS_ALLOW_CREDENTIALS",
+		"S3_HEALTHCHECKS_DISABLE", "S3_HEALTHCHECKS_INTERVAL", "HEALTHCHECK_INTERVAL",
 	}
 
 	for _, env := range envVars {
 		os.Unsetenv(env)
+	}
+}
+
+func TestS3HealthCheckInterval_MinimumLimit(t *testing.T) {
+	tests := []struct {
+		name           string
+		envValue       string
+		expectedResult time.Duration
+		description    string
+	}{
+		{
+			name:           "Below minimum",
+			envValue:       "2",
+			expectedResult: 10 * time.Second,
+			description:    "Values below 10 seconds should be adjusted to 10 seconds",
+		},
+		{
+			name:           "At minimum",
+			envValue:       "10",
+			expectedResult: 10 * time.Second,
+			description:    "Minimum value of 10 seconds should be preserved",
+		},
+		{
+			name:           "Above minimum",
+			envValue:       "60",
+			expectedResult: 60 * time.Second,
+			description:    "Values above 10 seconds should be preserved",
+		},
+		{
+			name:           "Default value",
+			envValue:       "",
+			expectedResult: 30 * time.Second,
+			description:    "Default value should be 30 seconds",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear environment
+			clearEnv()
+
+			// Set test value if provided
+			if tt.envValue != "" {
+				os.Setenv("S3_HEALTHCHECKS_INTERVAL", tt.envValue)
+			}
+
+			// Set required config values
+			os.Setenv("S3_BUCKET", "test-bucket")
+			os.Setenv("S3_ACCESS_KEY", "test-key")
+			os.Setenv("S3_SECRET_KEY", "test-secret")
+
+			defer clearEnv()
+
+			config, err := Load()
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedResult, config.Health.S3ChecksInterval, tt.description)
+		})
+	}
+}
+
+func TestHealthCheckInterval_MinimumLimit(t *testing.T) {
+	tests := []struct {
+		name           string
+		envValue       string
+		expectedResult time.Duration
+		description    string
+	}{
+		{
+			name:           "Below minimum",
+			envValue:       "5",
+			expectedResult: 10 * time.Second,
+			description:    "Values below 10 seconds should be adjusted to 10 seconds",
+		},
+		{
+			name:           "At minimum",
+			envValue:       "10",
+			expectedResult: 10 * time.Second,
+			description:    "Minimum value of 10 seconds should be preserved",
+		},
+		{
+			name:           "Above minimum",
+			envValue:       "45",
+			expectedResult: 45 * time.Second,
+			description:    "Values above 10 seconds should be preserved",
+		},
+		{
+			name:           "Default value",
+			envValue:       "",
+			expectedResult: 30 * time.Second,
+			description:    "Default value should be 30 seconds",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear environment
+			clearEnv()
+
+			// Set test value if provided
+			if tt.envValue != "" {
+				os.Setenv("HEALTHCHECK_INTERVAL", tt.envValue)
+			}
+
+			// Set required config values
+			os.Setenv("S3_BUCKET", "test-bucket")
+			os.Setenv("S3_ACCESS_KEY", "test-key")
+			os.Setenv("S3_SECRET_KEY", "test-secret")
+
+			defer clearEnv()
+
+			config, err := Load()
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedResult, config.Health.CheckInterval, tt.description)
+		})
 	}
 }

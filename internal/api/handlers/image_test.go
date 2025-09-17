@@ -99,7 +99,7 @@ func TestImageHandler_Upload(t *testing.T) {
 				mock.processUploadFunc = func(ctx context.Context, input service.UploadInput) (*service.UploadResult, error) {
 					return &service.UploadResult{
 						ImageID:              testutil.ValidUUID,
-						ProcessedResolutions: []string{"original", "thumbnail", "preview", "800x600", "1200x900"},
+						ProcessedResolutions: []string{"original", "thumbnail", "800x600", "1200x900"},
 					}, nil
 				}
 			},
@@ -115,7 +115,7 @@ func TestImageHandler_Upload(t *testing.T) {
 				mock.processUploadFunc = func(ctx context.Context, input service.UploadInput) (*service.UploadResult, error) {
 					return &service.UploadResult{
 						ImageID:              testutil.ValidUUID,
-						ProcessedResolutions: []string{"original", "thumbnail", "preview"},
+						ProcessedResolutions: []string{"original", "thumbnail"},
 					}, nil
 				}
 			},
@@ -322,7 +322,6 @@ func TestImageHandler_DownloadMethods(t *testing.T) {
 	}{
 		{"DownloadOriginal", (*ImageHandler).DownloadOriginal, "original"},
 		{"DownloadThumbnail", (*ImageHandler).DownloadThumbnail, "thumbnail"},
-		{"DownloadPreview", (*ImageHandler).DownloadPreview, "preview"},
 	}
 
 	for _, tt := range tests {
@@ -556,7 +555,7 @@ func TestImageHandler_ValidationHelpers(t *testing.T) {
 	// Test size validation
 	assert.True(t, handler.isValidSize("original"))
 	assert.True(t, handler.isValidSize("thumbnail"))
-	assert.True(t, handler.isValidSize("preview"))
+
 	assert.True(t, handler.isValidSize("800x600"))
 	assert.False(t, handler.isValidSize("invalid"))
 }
@@ -572,7 +571,7 @@ func TestImageHandler_FilenameGeneration(t *testing.T) {
 		{"test.jpg", "original", "test.jpg"},
 		{"test.jpg", "thumbnail", "test_thumbnail.jpg"},
 		{"test.jpg", "800x600", "test_800x600.jpg"},
-		{"image.png", "preview", "image_preview.png"},
+
 		{"noext", "thumbnail", "noext_thumbnail.jpg"},
 	}
 
