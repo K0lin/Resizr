@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"resizr/internal/models"
+	"resizr/internal/repository"
+	"resizr/internal/storage"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -17,7 +19,7 @@ import (
 type mockImageRepository struct {
 	healthFunc   func(ctx context.Context) error
 	closeFunc    func() error
-	getStatsFunc func(ctx context.Context) (*RepositoryStats, error)
+	getStatsFunc func(ctx context.Context) (*repository.RepositoryStats, error)
 }
 
 func (m *mockImageRepository) Save(ctx context.Context, metadata *models.ImageMetadata) error {
@@ -53,7 +55,7 @@ func (m *mockImageRepository) Close() error {
 	}
 	return nil
 }
-func (m *mockImageRepository) GetStats(ctx context.Context) (*RepositoryStats, error) {
+func (m *mockImageRepository) GetStats(ctx context.Context) (*repository.RepositoryStats, error) {
 	if m.getStatsFunc != nil {
 		return m.getStatsFunc(ctx)
 	}
@@ -67,7 +69,7 @@ type mockStorageProvider struct {
 	healthFunc func(ctx context.Context) error
 }
 
-func (m *mockStorageProvider) Upload(ctx context.Context, key string, data interface{}, size int64, contentType string) error {
+func (m *mockStorageProvider) Upload(ctx context.Context, key string, data io.Reader, size int64, contentType string) error {
 	return nil
 }
 func (m *mockStorageProvider) Download(ctx context.Context, key string) (io.ReadCloser, error) {
@@ -90,8 +92,14 @@ func (m *mockStorageProvider) Health(ctx context.Context) error { return m.Healt
 func (m *mockStorageProvider) CopyObject(ctx context.Context, srcKey, destKey string) error {
 	return nil
 }
-func (m *mockStorageProvider) GetMetadata(ctx context.Context, key string) (*models.ImageMetadata, error) {
+func (m *mockStorageProvider) GetMetadata(ctx context.Context, key string) (*storage.FileMetadata, error) {
 	return nil, nil
+}
+func (m *mockStorageProvider) ListObjects(ctx context.Context, prefix string, maxKeys int) ([]storage.ObjectInfo, error) {
+	return nil, nil
+}
+func (m *mockStorageProvider) GetURL(key string) string {
+	return ""
 }
 
 func TestNewHealthService(t *testing.T) {
@@ -114,12 +122,12 @@ func TestNewHealthService(t *testing.T) {
 
 func TestHealthService_CheckHealth_AllHealthy(t *testing.T) {
 	mockRepo := &mockImageRepository{
-		HealthCheckFunc: func(ctx context.Context) error {
+		healthFunc: func(ctx context.Context) error {
 			return nil
 		},
 	}
 	mockStorage := &mockStorageProvider{
-		HealthCheckFunc: func(ctx context.Context) error {
+		healthFunc: func(ctx context.Context) error {
 			return nil
 		},
 	}
@@ -141,12 +149,12 @@ func TestHealthService_CheckHealth_AllHealthy(t *testing.T) {
 func TestHealthService_CheckHealth_RedisUnhealthy(t *testing.T) {
 	repoError := errors.New("redis connection failed")
 	mockRepo := &mockImageRepository{
-		HealthCheckFunc: func(ctx context.Context) error {
+		healthFunc: func(ctx context.Context) error {
 			return repoError
 		},
 	}
 	mockStorage := &mockStorageProvider{
-		HealthCheckFunc: func(ctx context.Context) error {
+		healthFunc: func(ctx context.Context) error {
 			return nil
 		},
 	}
@@ -166,12 +174,12 @@ func TestHealthService_CheckHealth_RedisUnhealthy(t *testing.T) {
 func TestHealthService_CheckHealth_S3Unhealthy(t *testing.T) {
 	s3Error := errors.New("s3 bucket not accessible")
 	mockRepo := &mockImageRepository{
-		HealthCheckFunc: func(ctx context.Context) error {
+		healthFunc: func(ctx context.Context) error {
 			return nil
 		},
 	}
 	mockStorage := &mockStorageProvider{
-		HealthCheckFunc: func(ctx context.Context) error {
+		healthFunc: func(ctx context.Context) error {
 			return s3Error
 		},
 	}
@@ -193,12 +201,12 @@ func TestHealthService_CheckHealth_AllUnhealthy(t *testing.T) {
 	s3Error := errors.New("s3 down")
 
 	mockRepo := &mockImageRepository{
-		HealthCheckFunc: func(ctx context.Context) error {
+		healthFunc: func(ctx context.Context) error {
 			return repoError
 		},
 	}
 	mockStorage := &mockStorageProvider{
-		HealthCheckFunc: func(ctx context.Context) error {
+		healthFunc: func(ctx context.Context) error {
 			return s3Error
 		},
 	}
@@ -217,8 +225,8 @@ func TestHealthService_CheckHealth_AllUnhealthy(t *testing.T) {
 
 func TestHealthService_GetMetrics_Success(t *testing.T) {
 	mockRepo := &mockImageRepository{
-		GetStatsFunc: func(ctx context.Context) (*RepositoryStats, error) {
-			return &RepositoryStats{
+		getStatsFunc: func(ctx context.Context) (*repository.RepositoryStats, error) {
+			return &repository.RepositoryStats{
 				TotalImages: 150,
 				CacheHits:   1000,
 				CacheMisses: 50,
@@ -264,7 +272,7 @@ func TestHealthService_GetMetrics_Success(t *testing.T) {
 
 func TestHealthService_GetMetrics_RepositoryStatsError(t *testing.T) {
 	mockRepo := &mockImageRepository{
-		GetStatsFunc: func(ctx context.Context) (*RepositoryStats, error) {
+		getStatsFunc: func(ctx context.Context) (*repository.RepositoryStats, error) {
 			return nil, errors.New("stats unavailable")
 		},
 	}
@@ -289,10 +297,10 @@ func TestHealthService_GetMetrics_RepositoryStatsError(t *testing.T) {
 
 func TestHealthService_Uptime(t *testing.T) {
 	mockRepo := &mockImageRepository{
-		HealthCheckFunc: func(ctx context.Context) error { return nil },
+		healthFunc: func(ctx context.Context) error { return nil },
 	}
 	mockStorage := &mockStorageProvider{
-		HealthCheckFunc: func(ctx context.Context) error { return nil },
+		healthFunc: func(ctx context.Context) error { return nil },
 	}
 
 	service := NewHealthService(mockRepo, mockStorage, "1.0.0")
@@ -316,7 +324,7 @@ func TestHealthService_Uptime(t *testing.T) {
 
 func TestHealthService_Context_Cancellation(t *testing.T) {
 	mockRepo := &mockImageRepository{
-		HealthCheckFunc: func(ctx context.Context) error {
+		healthFunc: func(ctx context.Context) error {
 			// Simulate slow health check
 			select {
 			case <-time.After(100 * time.Millisecond):
@@ -327,7 +335,7 @@ func TestHealthService_Context_Cancellation(t *testing.T) {
 		},
 	}
 	mockStorage := &mockStorageProvider{
-		HealthCheckFunc: func(ctx context.Context) error {
+		healthFunc: func(ctx context.Context) error {
 			return nil
 		},
 	}
@@ -349,7 +357,7 @@ func TestHealthService_Context_Cancellation(t *testing.T) {
 func TestHealthService_MultipleChecks(t *testing.T) {
 	callCount := 0
 	mockRepo := &mockImageRepository{
-		HealthCheckFunc: func(ctx context.Context) error {
+		healthFunc: func(ctx context.Context) error {
 			callCount++
 			if callCount%2 == 0 {
 				return errors.New("intermittent failure")
@@ -358,7 +366,7 @@ func TestHealthService_MultipleChecks(t *testing.T) {
 		},
 	}
 	mockStorage := &mockStorageProvider{
-		HealthCheckFunc: func(ctx context.Context) error {
+		healthFunc: func(ctx context.Context) error {
 			return nil
 		},
 	}
@@ -418,10 +426,10 @@ func TestHealthService_Version(t *testing.T) {
 	for _, version := range testVersions {
 		t.Run("version_"+version, func(t *testing.T) {
 			mockRepo := &mockImageRepository{
-				HealthCheckFunc: func(ctx context.Context) error { return nil },
+				healthFunc: func(ctx context.Context) error { return nil },
 			}
 			mockStorage := &mockStorageProvider{
-				HealthCheckFunc: func(ctx context.Context) error { return nil },
+				healthFunc: func(ctx context.Context) error { return nil },
 			}
 
 			service := NewHealthService(mockRepo, mockStorage, version)

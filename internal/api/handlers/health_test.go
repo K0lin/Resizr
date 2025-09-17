@@ -45,9 +45,9 @@ func TestHealthHandler_Health(t *testing.T) {
 	}{
 		{
 			name: "healthy services",
-			setupMock: func(mock *testutil.MockHealthService) {
-				mock.CheckHealthFunc = func(ctx context.Context) (*testutil.ServiceHealthStatus, error) {
-					return &testutil.ServiceHealthStatus{
+			setupMock: func(mock *mockHealthService) {
+				mock.checkHealthFunc = func(ctx context.Context) (*service.HealthStatus, error) {
+					return &service.HealthStatus{
 						Services: map[string]string{
 							"redis":       "connected",
 							"s3":          "connected",
@@ -70,8 +70,8 @@ func TestHealthHandler_Health(t *testing.T) {
 		},
 		{
 			name: "degraded services",
-			setupMock: func(mock *testutil.MockHealthService) {
-				mock.CheckHealthFunc = func(ctx context.Context) (*service.HealthStatus, error) {
+			setupMock: func(mock *mockHealthService) {
+				mock.checkHealthFunc = func(ctx context.Context) (*service.HealthStatus, error) {
 					return &service.HealthStatus{
 						Services: map[string]string{
 							"redis":       "connected",
@@ -95,8 +95,8 @@ func TestHealthHandler_Health(t *testing.T) {
 		},
 		{
 			name: "health check error",
-			setupMock: func(mock *testutil.MockHealthService) {
-				mock.CheckHealthFunc = func(ctx context.Context) (*service.HealthStatus, error) {
+			setupMock: func(mock *mockHealthService) {
+				mock.checkHealthFunc = func(ctx context.Context) (*service.HealthStatus, error) {
 					return nil, errors.New("health check failed")
 				}
 			},
@@ -113,7 +113,7 @@ func TestHealthHandler_Health(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
-			mockService := &testutil.MockHealthService{}
+			mockService := &mockHealthService{}
 			tt.setupMock(mockService)
 
 			handler := NewHealthHandler(mockService)
@@ -151,8 +151,8 @@ func TestHealthHandler_Health(t *testing.T) {
 
 func TestHealthHandler_Health_ServiceDegradation(t *testing.T) {
 	// Test specific degradation scenarios
-	mockService := &testutil.MockHealthService{
-		CheckHealthFunc: func(ctx context.Context) (*service.HealthStatus, error) {
+	mockService := &mockHealthService{
+		checkHealthFunc: func(ctx context.Context) (*service.HealthStatus, error) {
 			return &service.HealthStatus{
 				Services: map[string]string{
 					"redis":       "connected",
@@ -182,14 +182,14 @@ func TestHealthHandler_Health_ServiceDegradation(t *testing.T) {
 func TestHealthHandler_Metrics(t *testing.T) {
 	tests := []struct {
 		name           string
-		setupMock      func(*testutil.MockHealthService)
+		setupMock      func(*mockHealthService)
 		expectedStatus int
 		expectError    bool
 	}{
 		{
 			name: "successful metrics retrieval",
-			setupMock: func(mock *testutil.MockHealthService) {
-				mock.GetMetricsFunc = func(ctx context.Context) (map[string]interface{}, error) {
+			setupMock: func(mock *mockHealthService) {
+				mock.getMetricsFunc = func(ctx context.Context) (map[string]interface{}, error) {
 					return map[string]interface{}{
 						"uptime":       "1h30m",
 						"requests":     1000,
@@ -203,8 +203,8 @@ func TestHealthHandler_Metrics(t *testing.T) {
 		},
 		{
 			name: "metrics error",
-			setupMock: func(mock *testutil.MockHealthService) {
-				mock.GetMetricsFunc = func(ctx context.Context) (map[string]interface{}, error) {
+			setupMock: func(mock *mockHealthService) {
+				mock.getMetricsFunc = func(ctx context.Context) (map[string]interface{}, error) {
 					return nil, errors.New("metrics collection failed")
 				}
 			},
@@ -216,7 +216,7 @@ func TestHealthHandler_Metrics(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
-			mockService := &testutil.MockHealthService{}
+			mockService := &mockHealthService{}
 			tt.setupMock(mockService)
 
 			handler := NewHealthHandler(mockService)

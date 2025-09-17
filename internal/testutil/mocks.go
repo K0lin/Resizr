@@ -36,6 +36,7 @@ type MockImageService struct {
 	ProcessUploadFunc        func(ctx context.Context, input UploadInput) (*UploadResult, error)
 	GetMetadataFunc          func(ctx context.Context, imageID string) (*models.ImageMetadata, error)
 	GetImageStreamFunc       func(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error)
+	ProcessResolutionFunc    func(ctx context.Context, imageID, resolution string) error
 	GeneratePresignedURLFunc func(ctx context.Context, storageKey string, expiration time.Duration) (string, error)
 	DeleteImageFunc          func(ctx context.Context, imageID string) error
 	ListImagesFunc           func(ctx context.Context, offset, limit int) ([]*models.ImageMetadata, int, error)
@@ -60,6 +61,13 @@ func (m *MockImageService) GetImageStream(ctx context.Context, imageID, resoluti
 		return m.GetImageStreamFunc(ctx, imageID, resolution)
 	}
 	return nil, nil, nil
+}
+
+func (m *MockImageService) ProcessResolution(ctx context.Context, imageID, resolution string) error {
+	if m.ProcessResolutionFunc != nil {
+		return m.ProcessResolutionFunc(ctx, imageID, resolution)
+	}
+	return nil
 }
 
 func (m *MockImageService) GeneratePresignedURL(ctx context.Context, storageKey string, expiration time.Duration) (string, error) {
