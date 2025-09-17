@@ -13,6 +13,7 @@ import (
 	"resizr/pkg/logger"
 
 	"github.com/disintegration/imaging"
+	"github.com/icza/gox/imagex/colorx"
 	"go.uber.org/zap"
 	"golang.org/x/image/webp"
 )
@@ -125,7 +126,8 @@ func (p *ProcessorServiceImpl) ProcessImage(data []byte, config ResizeConfig) ([
 		zap.Int("target_width", config.Width),
 		zap.Int("target_height", config.Height),
 		zap.String("mode", string(config.Mode)),
-		zap.Int("quality", config.Quality))
+		zap.Int("quality", config.Quality),
+		zap.String("background_color", config.BackgroundColor))
 
 	// Decode original image
 	srcImage, format, err := p.decodeImage(data)
@@ -143,19 +145,25 @@ func (p *ProcessorServiceImpl) ProcessImage(data []byte, config ResizeConfig) ([
 			config.Width, config.Height, p.maxWidth, p.maxHeight)
 	}
 
+	// Validate target canvas background
+	backgroundColor, err := colorx.ParseHexColor(config.BackgroundColor)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse background color HEX: %w", err)
+	}
+
 	// Apply resize based on mode
 	var resizedImage image.Image
 
 	switch config.Mode {
 	case ResizeModeSmartFit:
-		resizedImage = p.smartFitResize(srcImage, config.Width, config.Height)
+		resizedImage = p.smartFitResize(srcImage, config.Width, config.Height, backgroundColor)
 	case ResizeModeCrop:
 		resizedImage = p.cropResize(srcImage, config.Width, config.Height)
 	case ResizeModeStretch:
 		resizedImage = imaging.Resize(srcImage, config.Width, config.Height, imaging.Lanczos)
 	default:
 		// Default to smart fit
-		resizedImage = p.smartFitResize(srcImage, config.Width, config.Height)
+		resizedImage = p.smartFitResize(srcImage, config.Width, config.Height, backgroundColor)
 	}
 
 	// Encode the processed image
@@ -264,7 +272,7 @@ func (p *ProcessorServiceImpl) encodeImage(img image.Image, format string, quali
 }
 
 // smartFitResize implements smart fit algorithm
-func (p *ProcessorServiceImpl) smartFitResize(src image.Image, targetWidth, targetHeight int) image.Image {
+func (p *ProcessorServiceImpl) smartFitResize(src image.Image, targetWidth, targetHeight int, backgroundColor color.Color) image.Image {
 	srcBounds := src.Bounds()
 	srcWidth := srcBounds.Dx()
 	srcHeight := srcBounds.Dy()
@@ -290,7 +298,7 @@ func (p *ProcessorServiceImpl) smartFitResize(src image.Image, targetWidth, targ
 	resized := imaging.Resize(src, resizedWidth, resizedHeight, imaging.Lanczos)
 
 	// Create target canvas and center the resized image
-	canvas := imaging.New(targetWidth, targetHeight, color.RGBA{0, 0, 0, 0})
+	canvas := imaging.New(targetWidth, targetHeight, backgroundColor)
 
 	// Calculate position to center the image
 	x := (targetWidth - resizedWidth) / 2
