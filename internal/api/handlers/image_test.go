@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"resizr/internal/config"
 	"resizr/internal/models"
 	"resizr/internal/service"
 	"resizr/internal/testutil"
@@ -18,6 +17,66 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 )
+
+// Local mock to avoid import cycles
+type mockImageService struct {
+	processUploadFunc        func(ctx context.Context, input service.UploadInput) (*service.UploadResult, error)
+	getMetadataFunc          func(ctx context.Context, imageID string) (*models.ImageMetadata, error)
+	getImageStreamFunc       func(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error)
+	processResolutionFunc    func(ctx context.Context, imageID, resolution string) error
+	generatePresignedURLFunc func(ctx context.Context, storageKey string, expiration time.Duration) (string, error)
+	deleteImageFunc          func(ctx context.Context, imageID string) error
+	listImagesFunc           func(ctx context.Context, offset, limit int) ([]*models.ImageMetadata, int, error)
+}
+
+func (m *mockImageService) ProcessUpload(ctx context.Context, input service.UploadInput) (*service.UploadResult, error) {
+	if m.processUploadFunc != nil {
+		return m.processUploadFunc(ctx, input)
+	}
+	return nil, nil
+}
+
+func (m *mockImageService) GetMetadata(ctx context.Context, imageID string) (*models.ImageMetadata, error) {
+	if m.getMetadataFunc != nil {
+		return m.getMetadataFunc(ctx, imageID)
+	}
+	return nil, nil
+}
+
+func (m *mockImageService) GetImageStream(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error) {
+	if m.getImageStreamFunc != nil {
+		return m.getImageStreamFunc(ctx, imageID, resolution)
+	}
+	return nil, nil, nil
+}
+
+func (m *mockImageService) ProcessResolution(ctx context.Context, imageID, resolution string) error {
+	if m.processResolutionFunc != nil {
+		return m.processResolutionFunc(ctx, imageID, resolution)
+	}
+	return nil
+}
+
+func (m *mockImageService) GeneratePresignedURL(ctx context.Context, storageKey string, expiration time.Duration) (string, error) {
+	if m.generatePresignedURLFunc != nil {
+		return m.generatePresignedURLFunc(ctx, storageKey, expiration)
+	}
+	return "", nil
+}
+
+func (m *mockImageService) DeleteImage(ctx context.Context, imageID string) error {
+	if m.deleteImageFunc != nil {
+		return m.deleteImageFunc(ctx, imageID)
+	}
+	return nil
+}
+
+func (m *mockImageService) ListImages(ctx context.Context, offset, limit int) ([]*models.ImageMetadata, int, error) {
+	if m.listImagesFunc != nil {
+		return m.listImagesFunc(ctx, offset, limit)
+	}
+	return nil, 0, nil
+}
 
 func TestImageHandler_Upload(t *testing.T) {
 	cfg := testutil.TestConfig()
@@ -27,7 +86,7 @@ func TestImageHandler_Upload(t *testing.T) {
 		formData       map[string]string
 		fileContent    []byte
 		filename       string
-		setupMock      func(*testutil.MockImageService)
+		setupMock      func(*mockImageService)
 		expectedStatus int
 		expectError    bool
 	}{
@@ -36,9 +95,9 @@ func TestImageHandler_Upload(t *testing.T) {
 			formData:    map[string]string{"resolutions": "800x600,1200x900"},
 			fileContent: testutil.CreateTestImageData(),
 			filename:    "test.jpg",
-			setupMock: func(mock *testutil.MockImageService) {
-				mock.ProcessUploadFunc = func(ctx context.Context, input testutil.UploadInput) (*testutil.UploadResult, error) {
-					return &testutil.UploadResult{
+			setupMock: func(mock *mockImageService) {
+				mock.processUploadFunc = func(ctx context.Context, input service.UploadInput) (*service.UploadResult, error) {
+					return &service.UploadResult{
 						ImageID:              testutil.ValidUUID,
 						ProcessedResolutions: []string{"original", "thumbnail", "preview", "800x600", "1200x900"},
 					}, nil
@@ -52,9 +111,9 @@ func TestImageHandler_Upload(t *testing.T) {
 			formData:    map[string]string{},
 			fileContent: testutil.CreateTestImageData(),
 			filename:    "test.jpg",
-			setupMock: func(mock *testutil.MockImageService) {
-				mock.ProcessUploadFunc = func(ctx context.Context, input testutil.UploadInput) (*testutil.UploadResult, error) {
-					return &testutil.UploadResult{
+			setupMock: func(mock *mockImageService) {
+				mock.processUploadFunc = func(ctx context.Context, input service.UploadInput) (*service.UploadResult, error) {
+					return &service.UploadResult{
 						ImageID:              testutil.ValidUUID,
 						ProcessedResolutions: []string{"original", "thumbnail", "preview"},
 					}, nil
@@ -68,7 +127,7 @@ func TestImageHandler_Upload(t *testing.T) {
 			formData:       map[string]string{},
 			fileContent:    testutil.CreateLargeTestImageData(int(cfg.Image.MaxFileSize + 1)),
 			filename:       "large.jpg",
-			setupMock:      func(mock *testutil.MockImageService) {},
+			setupMock:      func(mock *mockImageService) {},
 			expectedStatus: http.StatusRequestEntityTooLarge,
 			expectError:    true,
 		},
@@ -77,8 +136,8 @@ func TestImageHandler_Upload(t *testing.T) {
 			formData:    map[string]string{},
 			fileContent: testutil.CreateTestImageData(),
 			filename:    "test.jpg",
-			setupMock: func(mock *testutil.MockImageService) {
-				mock.ProcessUploadFunc = func(ctx context.Context, input testutil.UploadInput) (*testutil.UploadResult, error) {
+			setupMock: func(mock *mockImageService) {
+				mock.processUploadFunc = func(ctx context.Context, input service.UploadInput) (*service.UploadResult, error) {
 					return nil, models.ProcessingError{
 						Operation: "upload",
 						Reason:    "invalid image format",
@@ -93,7 +152,7 @@ func TestImageHandler_Upload(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
-			mockService := &testutil.MockImageService{}
+			mockService := &mockImageService{}
 			tt.setupMock(mockService)
 
 			handler := NewImageHandler(mockService, cfg)
@@ -128,7 +187,7 @@ func TestImageHandler_Upload(t *testing.T) {
 
 func TestImageHandler_Upload_EdgeCases(t *testing.T) {
 	cfg := testutil.TestConfig()
-	mockService := &testutil.MockImageService{}
+	mockService := &mockImageService{}
 	handler := NewImageHandler(mockService, cfg)
 
 	t.Run("no file in request", func(t *testing.T) {
@@ -156,9 +215,9 @@ func TestImageHandler_Upload_EdgeCases(t *testing.T) {
 			"resolutions": "800x600",
 		}
 
-		mockService.ProcessUploadFunc = func(ctx context.Context, input testutil.UploadInput) (*testutil.UploadResult, error) {
+		mockService.processUploadFunc = func(ctx context.Context, input service.UploadInput) (*service.UploadResult, error) {
 			assert.Contains(t, input.Resolutions, "800x600")
-			return &testutil.UploadResult{
+			return &service.UploadResult{
 				ImageID:              testutil.ValidUUID,
 				ProcessedResolutions: []string{"original", "800x600"},
 			}, nil
@@ -177,15 +236,15 @@ func TestImageHandler_Info(t *testing.T) {
 	tests := []struct {
 		name           string
 		imageID        string
-		setupMock      func(*testutil.MockImageService)
+		setupMock      func(*mockImageService)
 		expectedStatus int
 		expectError    bool
 	}{
 		{
 			name:    "successful info retrieval",
 			imageID: testutil.ValidUUID,
-			setupMock: func(mock *testutil.MockImageService) {
-				mock.GetMetadataFunc = func(ctx context.Context, imageID string) (*models.ImageMetadata, error) {
+			setupMock: func(mock *mockImageService) {
+				mock.getMetadataFunc = func(ctx context.Context, imageID string) (*models.ImageMetadata, error) {
 					return testutil.CreateTestImageMetadata(), nil
 				}
 			},
@@ -195,15 +254,15 @@ func TestImageHandler_Info(t *testing.T) {
 		{
 			name:           "invalid UUID",
 			imageID:        testutil.InvalidUUID,
-			setupMock:      func(mock *testutil.MockImageService) {},
+			setupMock:      func(mock *mockImageService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectError:    true,
 		},
 		{
 			name:    "image not found",
 			imageID: testutil.ValidUUID,
-			setupMock: func(mock *testutil.MockImageService) {
-				mock.GetMetadataFunc = func(ctx context.Context, imageID string) (*models.ImageMetadata, error) {
+			setupMock: func(mock *mockImageService) {
+				mock.getMetadataFunc = func(ctx context.Context, imageID string) (*models.ImageMetadata, error) {
 					return nil, models.NotFoundError{
 						Resource: "image",
 						ID:       imageID,
@@ -218,7 +277,7 @@ func TestImageHandler_Info(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
-			mockService := &testutil.MockImageService{}
+			mockService := &mockImageService{}
 			tt.setupMock(mockService)
 
 			handler := NewImageHandler(mockService, testutil.TestConfig())
@@ -268,8 +327,8 @@ func TestImageHandler_DownloadMethods(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockService := &testutil.MockImageService{
-				GetImageStreamFunc: func(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error) {
+			mockService := &mockImageService{
+				getImageStreamFunc: func(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error) {
 					assert.Equal(t, testutil.ValidUUID, imageID)
 					assert.Equal(t, tt.resolution, resolution)
 					return testutil.NewMockReadCloser(testImageData), mockMetadata, nil
@@ -296,15 +355,15 @@ func TestImageHandler_DownloadCustomResolution(t *testing.T) {
 	tests := []struct {
 		name           string
 		resolution     string
-		setupMock      func(*testutil.MockImageService)
+		setupMock      func(*mockImageService)
 		expectedStatus int
 		expectError    bool
 	}{
 		{
 			name:       "valid custom resolution",
 			resolution: "800x600",
-			setupMock: func(mock *testutil.MockImageService) {
-				mock.GetImageStreamFunc = func(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error) {
+			setupMock: func(mock *mockImageService) {
+				mock.getImageStreamFunc = func(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error) {
 					return testutil.NewMockReadCloser(testutil.CreateTestImageData()), testutil.CreateTestImageMetadata(), nil
 				}
 			},
@@ -314,15 +373,15 @@ func TestImageHandler_DownloadCustomResolution(t *testing.T) {
 		{
 			name:           "invalid resolution format",
 			resolution:     "invalid",
-			setupMock:      func(mock *testutil.MockImageService) {},
+			setupMock:      func(mock *mockImageService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectError:    true,
 		},
 		{
 			name:       "service error",
 			resolution: "800x600",
-			setupMock: func(mock *testutil.MockImageService) {
-				mock.GetImageStreamFunc = func(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error) {
+			setupMock: func(mock *mockImageService) {
+				mock.getImageStreamFunc = func(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error) {
 					return nil, nil, models.NotFoundError{Resource: "image", ID: imageID}
 				}
 			},
@@ -333,7 +392,7 @@ func TestImageHandler_DownloadCustomResolution(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockService := &testutil.MockImageService{}
+			mockService := &mockImageService{}
 			tt.setupMock(mockService)
 
 			handler := NewImageHandler(mockService, testutil.TestConfig())
@@ -363,7 +422,7 @@ func TestImageHandler_GeneratePresignedURL(t *testing.T) {
 		imageID        string
 		resolution     string
 		expiresIn      string
-		setupMock      func(*testutil.MockImageService)
+		setupMock      func(*mockImageService)
 		expectedStatus int
 		expectError    bool
 	}{
@@ -372,12 +431,12 @@ func TestImageHandler_GeneratePresignedURL(t *testing.T) {
 			imageID:    testutil.ValidUUID,
 			resolution: "thumbnail",
 			expiresIn:  "3600",
-			setupMock: func(mock *testutil.MockImageService) {
+			setupMock: func(mock *mockImageService) {
 				mockMetadata := testutil.CreateTestImageMetadata()
-				mock.GetMetadataFunc = func(ctx context.Context, imageID string) (*models.ImageMetadata, error) {
+				mock.getMetadataFunc = func(ctx context.Context, imageID string) (*models.ImageMetadata, error) {
 					return mockMetadata, nil
 				}
-				mock.GeneratePresignedURLFunc = func(ctx context.Context, storageKey string, expiration time.Duration) (string, error) {
+				mock.generatePresignedURLFunc = func(ctx context.Context, storageKey string, expiration time.Duration) (string, error) {
 					return "https://example.com/presigned-url", nil
 				}
 			},
@@ -388,7 +447,7 @@ func TestImageHandler_GeneratePresignedURL(t *testing.T) {
 			name:           "invalid UUID",
 			imageID:        testutil.InvalidUUID,
 			resolution:     "thumbnail",
-			setupMock:      func(mock *testutil.MockImageService) {},
+			setupMock:      func(mock *mockImageService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectError:    true,
 		},
@@ -397,7 +456,7 @@ func TestImageHandler_GeneratePresignedURL(t *testing.T) {
 			imageID:        testutil.ValidUUID,
 			resolution:     "thumbnail",
 			expiresIn:      "invalid",
-			setupMock:      func(mock *testutil.MockImageService) {},
+			setupMock:      func(mock *mockImageService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectError:    true,
 		},
@@ -406,7 +465,7 @@ func TestImageHandler_GeneratePresignedURL(t *testing.T) {
 			imageID:        testutil.ValidUUID,
 			resolution:     "thumbnail",
 			expiresIn:      strconv.Itoa(8 * 24 * 3600), // 8 days
-			setupMock:      func(mock *testutil.MockImageService) {},
+			setupMock:      func(mock *mockImageService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectError:    true,
 		},
@@ -415,8 +474,8 @@ func TestImageHandler_GeneratePresignedURL(t *testing.T) {
 			imageID:    testutil.ValidUUID,
 			resolution: "thumbnail",
 			expiresIn:  "3600",
-			setupMock: func(mock *testutil.MockImageService) {
-				mock.GetMetadataFunc = func(ctx context.Context, imageID string) (*models.ImageMetadata, error) {
+			setupMock: func(mock *mockImageService) {
+				mock.getMetadataFunc = func(ctx context.Context, imageID string) (*models.ImageMetadata, error) {
 					return nil, models.NotFoundError{Resource: "image", ID: imageID}
 				}
 			},
@@ -428,9 +487,9 @@ func TestImageHandler_GeneratePresignedURL(t *testing.T) {
 			imageID:    testutil.ValidUUID,
 			resolution: "nonexistent",
 			expiresIn:  "3600",
-			setupMock: func(mock *testutil.MockImageService) {
+			setupMock: func(mock *mockImageService) {
 				mockMetadata := testutil.CreateTestImageMetadata()
-				mock.GetMetadataFunc = func(ctx context.Context, imageID string) (*models.ImageMetadata, error) {
+				mock.getMetadataFunc = func(ctx context.Context, imageID string) (*models.ImageMetadata, error) {
 					return mockMetadata, nil
 				}
 			},
@@ -441,7 +500,7 @@ func TestImageHandler_GeneratePresignedURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockService := &testutil.MockImageService{}
+			mockService := &mockImageService{}
 			tt.setupMock(mockService)
 
 			handler := NewImageHandler(mockService, testutil.TestConfig())
@@ -578,7 +637,7 @@ func TestImageHandler_ErrorHandling(t *testing.T) {
 }
 
 func TestNewImageHandler(t *testing.T) {
-	mockService := &testutil.MockImageService{}
+	mockService := &mockImageService{}
 	cfg := testutil.TestConfig()
 
 	handler := NewImageHandler(mockService, cfg)

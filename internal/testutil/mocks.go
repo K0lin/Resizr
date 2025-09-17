@@ -8,21 +8,27 @@ import (
 	"resizr/internal/models"
 )
 
-// UploadInput represents input for image upload
-type UploadInput struct {
+// ServiceUploadInput represents input for image upload (matches service.UploadInput)
+type ServiceUploadInput struct {
 	Filename    string   `json:"filename"`
 	Data        []byte   `json:"-"`
 	Size        int64    `json:"size"`
 	Resolutions []string `json:"resolutions"`
 }
 
-// UploadResult represents the result of image upload
-type UploadResult struct {
+// ServiceUploadResult represents the result of image upload (matches service.UploadResult)
+type ServiceUploadResult struct {
 	ImageID              string           `json:"image_id"`
 	ProcessedResolutions []string         `json:"processed_resolutions"`
 	OriginalSize         int64            `json:"original_size"`
 	ProcessedSizes       map[string]int64 `json:"processed_sizes"`
 }
+
+// UploadInput represents input for image upload (deprecated, use ServiceUploadInput)
+type UploadInput = ServiceUploadInput
+
+// UploadResult represents the result of image upload (deprecated, use ServiceUploadResult)
+type UploadResult = ServiceUploadResult
 
 // HealthStatus represents health check status - duplicated to avoid import cycles
 type HealthStatus struct {
@@ -33,7 +39,7 @@ type HealthStatus struct {
 
 // MockImageService is a mock implementation of ImageService
 type MockImageService struct {
-	ProcessUploadFunc        func(ctx context.Context, input UploadInput) (*UploadResult, error)
+	ProcessUploadFunc        func(ctx context.Context, input interface{}) (interface{}, error)
 	GetMetadataFunc          func(ctx context.Context, imageID string) (*models.ImageMetadata, error)
 	GetImageStreamFunc       func(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error)
 	ProcessResolutionFunc    func(ctx context.Context, imageID, resolution string) error
@@ -42,7 +48,7 @@ type MockImageService struct {
 	ListImagesFunc           func(ctx context.Context, offset, limit int) ([]*models.ImageMetadata, int, error)
 }
 
-func (m *MockImageService) ProcessUpload(ctx context.Context, input UploadInput) (*UploadResult, error) {
+func (m *MockImageService) ProcessUpload(ctx context.Context, input interface{}) (interface{}, error) {
 	if m.ProcessUploadFunc != nil {
 		return m.ProcessUploadFunc(ctx, input)
 	}
@@ -91,7 +97,7 @@ func (m *MockImageService) ListImages(ctx context.Context, offset, limit int) ([
 	return nil, 0, nil
 }
 
-// ServiceHealthStatus represents health check status - duplicated to avoid import cycles
+// ServiceHealthStatus represents health check status (matches service.HealthStatus)
 type ServiceHealthStatus struct {
 	Services map[string]string `json:"services"`
 	Uptime   int64             `json:"uptime_seconds"`
@@ -100,11 +106,11 @@ type ServiceHealthStatus struct {
 
 // MockHealthService is a mock implementation of HealthService
 type MockHealthService struct {
-	CheckHealthFunc func(ctx context.Context) (*ServiceHealthStatus, error)
+	CheckHealthFunc func(ctx context.Context) (interface{}, error)
 	GetMetricsFunc  func(ctx context.Context) (map[string]interface{}, error)
 }
 
-func (m *MockHealthService) CheckHealth(ctx context.Context) (*ServiceHealthStatus, error) {
+func (m *MockHealthService) CheckHealth(ctx context.Context) (interface{}, error) {
 	if m.CheckHealthFunc != nil {
 		return m.CheckHealthFunc(ctx)
 	}
@@ -234,6 +240,7 @@ type MockStorageProvider struct {
 	HealthCheckFunc          func(ctx context.Context) error
 	HealthFunc               func(ctx context.Context) error
 	GetMetadataFunc          func(ctx context.Context, key string) (*models.ImageMetadata, error)
+	CopyObjectFunc           func(ctx context.Context, srcKey, destKey string) error
 }
 
 func (m *MockStorageProvider) Upload(ctx context.Context, key string, data io.Reader, size int64, contentType string) error {
@@ -292,26 +299,33 @@ func (m *MockStorageProvider) GetMetadata(ctx context.Context, key string) (*mod
 	return nil, nil
 }
 
+func (m *MockStorageProvider) CopyObject(ctx context.Context, srcKey, destKey string) error {
+	if m.CopyObjectFunc != nil {
+		return m.CopyObjectFunc(ctx, srcKey, destKey)
+	}
+	return nil
+}
+
 // MockProcessorService is a mock implementation of ProcessorService
 type MockProcessorService struct {
-	ProcessImageFunc  func(ctx context.Context, request models.ImageProcessingRequest, imageData []byte) ([]byte, error)
-	ValidateImageFunc func(data []byte) (width, height int, mimeType string, err error)
+	ProcessImageFunc  func(data []byte, config interface{}) ([]byte, error)
+	ValidateImageFunc func(data []byte, maxSize int64) error
 	DetectFormatFunc  func(data []byte) (string, error)
 	GetDimensionsFunc func(data []byte) (width, height int, err error)
 }
 
-func (m *MockProcessorService) ProcessImage(ctx context.Context, request models.ImageProcessingRequest, imageData []byte) ([]byte, error) {
+func (m *MockProcessorService) ProcessImage(data []byte, config interface{}) ([]byte, error) {
 	if m.ProcessImageFunc != nil {
-		return m.ProcessImageFunc(ctx, request, imageData)
+		return m.ProcessImageFunc(data, config)
 	}
 	return nil, nil
 }
 
-func (m *MockProcessorService) ValidateImage(data []byte) (width, height int, mimeType string, err error) {
+func (m *MockProcessorService) ValidateImage(data []byte, maxSize int64) error {
 	if m.ValidateImageFunc != nil {
-		return m.ValidateImageFunc(data)
+		return m.ValidateImageFunc(data, maxSize)
 	}
-	return 0, 0, "", nil
+	return nil
 }
 
 func (m *MockProcessorService) DetectFormat(data []byte) (string, error) {

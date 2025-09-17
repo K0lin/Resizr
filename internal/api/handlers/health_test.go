@@ -6,9 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
-	"resizr/internal/models"
 	"resizr/internal/service"
 	"resizr/internal/testutil"
 
@@ -250,7 +248,7 @@ func TestHealthHandler_Metrics(t *testing.T) {
 }
 
 func TestNewHealthHandler(t *testing.T) {
-	mockService := &testutil.MockHealthService{}
+	mockService := &mockHealthService{}
 	handler := NewHealthHandler(mockService)
 
 	assert.NotNil(t, handler)
@@ -258,12 +256,12 @@ func TestNewHealthHandler(t *testing.T) {
 }
 
 func TestHealthHandler_RequestIDExtraction(t *testing.T) {
-	mockService := &testutil.MockHealthService{
-		CheckHealthFunc: func(ctx context.Context) (*models.HealthResponse, error) {
-			return &models.HealthResponse{
-				Status:    "healthy",
-				Services:  map[string]string{"test": "connected"},
-				Timestamp: time.Now(),
+	mockService := &mockHealthService{
+		checkHealthFunc: func(ctx context.Context) (*service.HealthStatus, error) {
+			return &service.HealthStatus{
+				Services: map[string]string{"test": "connected"},
+				Uptime:   3600,
+				Version:  "1.0.0",
 			}, nil
 		},
 	}
@@ -295,8 +293,8 @@ func TestHealthHandler_RequestIDExtraction(t *testing.T) {
 
 func TestHealthHandler_EdgeCases(t *testing.T) {
 	t.Run("nil health service response", func(t *testing.T) {
-		mockService := &testutil.MockHealthService{
-			CheckHealthFunc: func(ctx context.Context) (*models.HealthResponse, error) {
+		mockService := &mockHealthService{
+			checkHealthFunc: func(ctx context.Context) (*service.HealthStatus, error) {
 				return nil, nil // This should not happen but we test defensive coding
 			},
 		}
@@ -312,12 +310,12 @@ func TestHealthHandler_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("empty services map", func(t *testing.T) {
-		mockService := &testutil.MockHealthService{
-			CheckHealthFunc: func(ctx context.Context) (*models.HealthResponse, error) {
-				return &models.HealthResponse{
-					Status:    "healthy",
-					Services:  map[string]string{}, // Empty services
-					Timestamp: time.Now(),
+		mockService := &mockHealthService{
+			checkHealthFunc: func(ctx context.Context) (*service.HealthStatus, error) {
+				return &service.HealthStatus{
+					Services: map[string]string{}, // Empty services
+					Uptime:   3600,
+					Version:  "1.0.0",
 				}, nil
 			},
 		}
