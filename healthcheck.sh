@@ -8,7 +8,8 @@ set -e
 # Configuration with defaults (matching the Go config defaults)
 HEALTHCHECK_INTERVAL=${HEALTHCHECK_INTERVAL:-30}
 S3_HEALTHCHECKS_DISABLE=${S3_HEALTHCHECKS_DISABLE:-false}
-HEALTH_URL="http://localhost:8080/health"
+PORT=${PORT:-8080}
+HEALTH_URL="http://localhost:${PORT}/health"
 
 # Enforce minimum interval of 10 seconds
 if [ "$HEALTHCHECK_INTERVAL" -lt 10 ]; then
