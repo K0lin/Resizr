@@ -144,7 +144,6 @@ func Load() (*Config, error) {
 			SupportedFormats:           []string{"image/jpeg", "image/png", "image/gif", "image/webp"},
 			DefaultResolutions: map[string]ResolutionConfig{
 				"thumbnail": {Width: 150, Height: 150},
-				"preview":   {Width: 800, Height: 600},
 			},
 			MaxWidth:  getEnvInt("IMAGE_MAX_WIDTH", 4096),
 			MaxHeight: getEnvInt("IMAGE_MAX_HEIGHT", 4096),

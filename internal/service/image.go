@@ -105,7 +105,7 @@ func (s *ImageServiceImpl) ProcessUpload(ctx context.Context, input UploadInput)
 	// Add predefined resolutions based on configuration
 	var allResolutions []string
 	if s.config.Image.GenerateDefaultResolutions {
-		allResolutions = append([]string{"thumbnail", "preview"}, input.Resolutions...)
+		allResolutions = append([]string{"thumbnail"}, input.Resolutions...)
 	} else {
 		allResolutions = input.Resolutions
 	}

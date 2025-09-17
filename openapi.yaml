@@ -64,7 +64,7 @@ paths:
         The service will:
         1. Validate the uploaded file (format, size, etc.)
         2. Generate a unique UUID for the image
-        3. Process default resolutions (thumbnail, preview) if enabled via GENERATE_DEFAULT_RESOLUTIONS
+        3. Process default resolutions (thumbnail) if enabled via GENERATE_DEFAULT_RESOLUTIONS
         4. Process any requested custom resolutions
         5. Store all versions in S3-compatible storage
         6. Save metadata to Redis
@@ -130,7 +130,7 @@ paths:
               example:
                 id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
                 message: "Image uploaded successfully"
-                resolutions: ["original", "thumbnail", "preview", "800x600", "1200x900"]
+                resolutions: ["original", "thumbnail", "800x600", "1200x900"]
         '400':
           $ref: '#/components/responses/BadRequest'
         '413':
@@ -154,7 +154,7 @@ paths:
       description: |
         Retrieve comprehensive metadata for an uploaded image, including:
         - File information (name, size, format, dimensions)
-        - Available resolutions (original, thumbnail, preview, custom)
+        - Available resolutions (original, thumbnail, custom)
         - Upload and modification timestamps
         
         This endpoint is lightweight and fast (~10ms response time).
@@ -196,7 +196,7 @@ paths:
                 dimensions:
                   width: 1920
                   height: 1080
-                available_resolutions: ["original", "thumbnail", "preview", "800x600", "1200x900"]
+                available_resolutions: ["original", "thumbnail", "800x600", "1200x900"]
                 created_at: "2025-09-11T10:30:00Z"
         '404':
           $ref: '#/components/responses/NotFound'
@@ -415,53 +415,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /api/v1/images/{id}/preview:
-    get:
-      tags:
-        - Images
-      summary: Download preview
-      description: |
-        Download an 800x600 pixel preview version of the image.
-        
-        **Processing:**
-        - Smart-fit algorithm maintains aspect ratio
-        - White background for letterboxing/pillarboxing
-        - Balanced compression for quality and size
-        
-      operationId: downloadPreview
-      parameters:
-        - $ref: '#/components/parameters/ImageId'
-        - $ref: '#/components/parameters/IfNoneMatch'
-      responses:
-        '200':
-          description: Preview image (800x600)
-          headers:
-            Content-Type:
-              schema:
-                type: string
-              example: "image/jpeg"
-            Content-Length:
-              schema:
-                type: integer
-              example: 65536
-            Cache-Control:
-              schema:
-                type: string
-              example: "public, max-age=31536000, immutable"
-          content:
-            image/*:
-              schema:
-                type: string
-                format: binary
-        '304':
-          $ref: '#/components/responses/NotModified'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
   /api/v1/images/{id}/{resolution}:
     get:
       tags:
@@ -653,7 +606,7 @@ components:
       description: Image resolution/size
       schema:
         type: string
-        pattern: '^(original|thumbnail|preview|[1-9]\d{0,3}x[1-9]\d{0,3})$'
+        pattern: '^(original|thumbnail|[1-9]\d{0,3}x[1-9]\d{0,3})$'
       example: "thumbnail"
 
   schemas:
@@ -678,7 +631,7 @@ components:
           items:
             type: string
           description: List of available resolutions for this image
-          example: ["original", "thumbnail", "preview", "800x600", "1200x900"]
+          example: ["original", "thumbnail", "800x600", "1200x900"]
 
     InfoResponse:
       type: object
@@ -717,7 +670,7 @@ components:
           items:
             type: string
           description: List of available resolutions for this image
-          example: ["original", "thumbnail", "preview", "800x600", "1200x900"]
+          example: ["original", "thumbnail", "800x600", "1200x900"]
         created_at:
           type: string
           format: date-time
