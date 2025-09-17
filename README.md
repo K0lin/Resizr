@@ -12,7 +12,7 @@
 
 ## 🚀 Features
 
-- **Multi-Resolution Processing**: Automatic thumbnail, preview, and custom resolution generation
+- **Multi-Resolution Processing**: Automatic thumbnail and custom resolution generation
 - **High-Performance**: Streaming uploads/downloads, connection pooling, optimized processing
 - **Production Ready**: Rate limiting, health checks, structured logging, error handling
 - **Cloud Native**: Containerization with Docker and Kubernetes support
@@ -86,7 +86,7 @@ S3_URL_EXPIRE=3600                    # Pre-signed URL expiration in seconds
 # Image Processing Configuration
 MAX_FILE_SIZE=10485760        # Maximum upload file size in bytes (10MB)
 IMAGE_QUALITY=85              # JPEG compression quality (1-100, higher = better)
-GENERATE_DEFAULT_RESOLUTIONS=true # Auto-generate thumbnail and preview resolutions
+GENERATE_DEFAULT_RESOLUTIONS=true # Auto-generate thumbnail resolution
 RESIZE_MODE=smart_fit        # Image resize algorithm (smart_fit, crop, stretch)
 IMAGE_MAX_WIDTH=4096         # Maximum allowed width for requested/custom resolutions (up to 8192)
 IMAGE_MAX_HEIGHT=4096        # Maximum allowed height for requested/custom resolutions (up to 8192)
@@ -104,7 +104,7 @@ CORS_ALLOW_CREDENTIALS=false # Allow credentials in CORS requests
 ```
 
 **Note on Resolution Processing:**
-- When `GENERATE_DEFAULT_RESOLUTIONS=true` (default), the service automatically creates thumbnail (150x150) and preview (800x600) versions of every uploaded image
+- When `GENERATE_DEFAULT_RESOLUTIONS=true` (default), the service automatically creates thumbnail (150x150) version of every uploaded image
 - When set to `false`, only custom resolutions specified in the upload request will be generated
 - This allows for more control over storage usage and processing time in scenarios where default resolutions aren't needed
 
@@ -185,7 +185,7 @@ https://your-domain.com/api/v1
 | `GET` | `/images/{id}/info` | Get image metadata | 50/min |
 | `GET` | `/images/{id}/original` | Download original image | 100/min |
 | `GET` | `/images/{id}/thumbnail` | Download thumbnail (150x150) | 100/min |
-| `GET` | `/images/{id}/preview` | Download preview (800x600) | 100/min |
+
 | `GET` | `/images/{id}/{resolution}` | Download custom resolution | 100/min |
 | `GET` | `/images/{id}/{resolution}/presigned-url` | Generate presigned URL for direct access | 50/min |
 | `GET` | `/health` | Health check | Unlimited |
@@ -316,7 +316,6 @@ RESIZR follows Clean Architecture principles with clear separation of concerns:
    ├── Upload to S3: images/{uuid}/original.ext
    ├── Process requested resolutions
    │   ├── Thumbnail: Smart fit to 150x150
-   │   ├── Preview: Smart fit to 800x600
    │   └── Custom: Parse and process "WIDTHxHEIGHT"
    ├── Upload processed images to S3
    └── Store metadata in Redis
@@ -359,7 +358,6 @@ s3://bucket/
     └── {uuid}/
         ├── original.jpg     # Original uploaded image
         ├── thumbnail.jpg    # 150x150 thumbnail
-        ├── preview.jpg      # 800x600 preview
         └── 800x600.jpg      # Custom resolution
 ```
 

@@ -143,7 +143,7 @@ func CreateTestImageMetadata() *models.ImageMetadata {
 		Size:        102400, // 100KB
 		Width:       1920,
 		Height:      1080,
-		Resolutions: []string{"thumbnail", "preview", "800x600"},
+		Resolutions: []string{"thumbnail", "800x600"},
 		CreatedAt:   time.Now().Add(-time.Hour),
 		UpdatedAt:   time.Now(),
 	}

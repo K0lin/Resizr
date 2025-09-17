@@ -263,8 +263,6 @@ func ParseResolution(resolution string) (ResolutionConfig, error) {
 	switch resolution {
 	case "thumbnail":
 		return ResolutionConfig{Width: 150, Height: 150}, nil
-	case "preview":
-		return ResolutionConfig{Width: 800, Height: 600}, nil
 	case "original":
 		return ResolutionConfig{}, fmt.Errorf("original resolution cannot be parsed")
 	}

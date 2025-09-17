@@ -288,7 +288,6 @@ func TestImageService_ProcessUpload_Success(t *testing.T) {
 	assert.Contains(t, result.ProcessedResolutions, "800x600")
 	if cfg.Image.GenerateDefaultResolutions {
 		assert.Contains(t, result.ProcessedResolutions, "thumbnail")
-		assert.Contains(t, result.ProcessedResolutions, "preview")
 	}
 	assert.Equal(t, input.Size, result.OriginalSize)
 }
@@ -772,11 +771,10 @@ func TestUploadInput_Validation(t *testing.T) {
 func TestUploadResult_Structure(t *testing.T) {
 	result := &UploadResult{
 		ImageID:              testutil.ValidUUID,
-		ProcessedResolutions: []string{"thumbnail", "preview", "800x600"},
+		ProcessedResolutions: []string{"thumbnail", "800x600"},
 		OriginalSize:         102400,
 		ProcessedSizes: map[string]int64{
 			"thumbnail": 5000,
-			"preview":   25000,
 			"800x600":   15000,
 		},
 	}
