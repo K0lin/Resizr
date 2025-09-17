@@ -113,8 +113,8 @@ func (rl *RateLimiter) getLimiter(key string, limit int) *rate.Limiter {
 
 	limiter, exists := rl.limiters[key]
 	if !exists {
-		// Create new limiter: burst = 2x rate, refill every minute
-		limiter = rate.NewLimiter(rate.Every(time.Minute), limit*2)
+		// Create new limiter: burst = rate limit, refill every minute
+		limiter = rate.NewLimiter(rate.Every(time.Minute), limit)
 		rl.limiters[key] = limiter
 	}
 

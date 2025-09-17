@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -43,6 +44,20 @@ func (h *HealthHandler) Health(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, models.HealthResponse{
 			Status:    "unhealthy",
 			Services:  map[string]string{"error": err.Error()},
+			Timestamp: time.Now(),
+		})
+		return
+	}
+
+	// Handle nil response defensively
+	if healthStatus == nil {
+		logger.ErrorWithContext(ctx, "Health check failed",
+			zap.Error(errors.New("health check returned nil")),
+			zap.String("request_id", requestID))
+
+		c.JSON(http.StatusServiceUnavailable, models.HealthResponse{
+			Status:    "unhealthy",
+			Services:  map[string]string{"error": "health check returned nil"},
 			Timestamp: time.Now(),
 		})
 		return

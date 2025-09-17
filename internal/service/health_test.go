@@ -247,7 +247,7 @@ func TestHealthService_GetMetrics_Success(t *testing.T) {
 	systemMetrics, ok := metrics["system"].(map[string]interface{})
 	assert.True(t, ok)
 	assert.Equal(t, "1.0.0", systemMetrics["version"])
-	assert.Greater(t, systemMetrics["uptime_seconds"].(int64), int64(0))
+	assert.Greater(t, systemMetrics["uptime_milliseconds"].(int64), int64(0))
 	assert.Equal(t, runtime.Version(), systemMetrics["go_version"])
 	assert.Greater(t, systemMetrics["goroutines"].(int), 0)
 	assert.Equal(t, runtime.NumCPU(), systemMetrics["cpu_count"])

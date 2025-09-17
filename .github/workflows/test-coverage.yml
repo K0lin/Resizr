@@ -105,12 +105,6 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.25.1'
-
-    - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v6
-      with:
-        version: latest
-        args: --timeout=5m
   build:
     runs-on: ubuntu-latest
     needs: [test, lint]

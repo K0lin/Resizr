@@ -323,7 +323,7 @@ func TestRateLimiter_GetLimiter(t *testing.T) {
 	// Test creating new limiter
 	limiter1 := rl.getLimiter("key1", 10)
 	assert.NotNil(t, limiter1)
-	assert.Equal(t, 20, limiter1.Burst()) // Burst is 2x rate
+	assert.Equal(t, 10, limiter1.Burst()) // Burst equals rate
 
 	// Test getting existing limiter
 	limiter2 := rl.getLimiter("key1", 10)

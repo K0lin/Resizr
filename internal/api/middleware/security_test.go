@@ -49,6 +49,9 @@ func TestSecurityHeaders_Production(t *testing.T) {
 		Server: config.ServerConfig{
 			GinMode: "release", // Production mode
 		},
+		Logger: config.LoggerConfig{
+			Format: "json", // Production mode requires json format
+		},
 	}
 
 	gin.SetMode(gin.TestMode)
@@ -92,6 +95,9 @@ func TestSecurityHeaders_CSPContent(t *testing.T) {
 		Server: config.ServerConfig{
 			GinMode: "release",
 		},
+		Logger: config.LoggerConfig{
+			Format: "json",
+		},
 	}
 
 	gin.SetMode(gin.TestMode)
@@ -128,6 +134,9 @@ func TestSecurityHeaders_MultipleRequests(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			GinMode: "release",
+		},
+		Logger: config.LoggerConfig{
+			Format: "json",
 		},
 	}
 
@@ -327,6 +336,9 @@ func TestSecurityHeaders_AllHeaders(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			GinMode: "release",
+		},
+		Logger: config.LoggerConfig{
+			Format: "json",
 		},
 	}
 
