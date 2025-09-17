@@ -1,4 +1,4 @@
-name: Go Build
+name: Build and Test
 
 on:
   push:
@@ -9,8 +9,20 @@ on:
       - main
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,5 +32,67 @@ jobs:
         with:
           go-version: '1.25.1'
 
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run go fmt check
+        run: |
+          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+            echo "The following files are not properly formatted:"
+            gofmt -s -l .
+            exit 1
+          fi
+
+      - name: Run tests with coverage
+        run: |
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./internal/models/... ./internal/config/...
+        env:
+          S3_BUCKET: test-bucket
+          S3_ACCESS_KEY: test-access-key
+          S3_SECRET_KEY: test-secret-key
+          REDIS_URL: redis://localhost:6379
+
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
+          echo "Current coverage: $COVERAGE%"
+          THRESHOLD=95.0
+          if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+            echo "Coverage $COVERAGE% is below threshold $THRESHOLD%"
+            exit 1
+          fi
+          echo "Coverage $COVERAGE% meets threshold $THRESHOLD%"
+
       - name: Build Go program
-        run: go build ./cmd/server/main.go
+        run: go build -v -ldflags="-w -s" -o resizr ./cmd/server/main.go
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.1'
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          args: --timeout=5m
