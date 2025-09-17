@@ -4,7 +4,7 @@
 [![Redis](https://img.shields.io/badge/Redis-6.0+-DC382D?style=for-the-badge&logo=redis)](https://redis.io/)
 [![AWS S3](https://img.shields.io/badge/AWS%20S3-Compatible-FF9900?style=for-the-badge&logo=amazon-aws)](https://aws.amazon.com/s3/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker)](https://docker.com/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 **RESIZR** is a high-performance, production-ready Go microservice for image upload, processing, and delivery. Built with modern cloud-native patterns, it provides RESTful APIs for image management with automatic multi-resolution processing, Redis-based metadata storage, and S3-compatible file storage.
 
