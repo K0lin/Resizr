@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -187,19 +188,19 @@ func (h *ImageHandler) Info(c *gin.Context) {
 // DownloadOriginal handles original image download
 // GET /api/v1/images/:id/original
 func (h *ImageHandler) DownloadOriginal(c *gin.Context) {
-	h.downloadImage(c, "original")
+	h.downloadImage(c, "original", "original")
 }
 
 // DownloadThumbnail handles thumbnail download
 // GET /api/v1/images/:id/thumbnail
 func (h *ImageHandler) DownloadThumbnail(c *gin.Context) {
-	h.downloadImage(c, "thumbnail")
+	h.downloadImage(c, "thumbnail", "original")
 }
 
 // DownloadPreview handles preview download
 // GET /api/v1/images/:id/preview
 func (h *ImageHandler) DownloadPreview(c *gin.Context) {
-	h.downloadImage(c, "preview")
+	h.downloadImage(c, "preview", "original")
 }
 
 // DownloadCustomResolution handles custom resolution download
@@ -217,11 +218,28 @@ func (h *ImageHandler) DownloadCustomResolution(c *gin.Context) {
 		return
 	}
 
-	h.downloadImage(c, resolution)
+	h.downloadImage(c, resolution, "original")
+}
+
+// DownloadConvertedImage handles converted image download
+// GET /api/v1/images/:id/convert/:type
+func (h *ImageHandler) DownloadConvertedImage(c *gin.Context) {
+	format := c.Param("format")
+
+	if !h.isValidFormat(format) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Invalid convertion format",
+			Message: "Format must be `jpeg`, `png`, `gif` or `webp`",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	h.downloadImage(c, "original", format)
 }
 
 // downloadImage is a common handler for all image downloads
-func (h *ImageHandler) downloadImage(c *gin.Context, resolution string) {
+func (h *ImageHandler) downloadImage(c *gin.Context, resolution, format string) {
 	ctx := c.Request.Context()
 	requestID := c.GetString("request_id")
 	imageID := c.Param("id")
@@ -229,6 +247,7 @@ func (h *ImageHandler) downloadImage(c *gin.Context, resolution string) {
 	logger.DebugWithContext(ctx, "Processing image download",
 		zap.String("image_id", imageID),
 		zap.String("resolution", resolution),
+		zap.String("format", format),
 		zap.String("request_id", requestID))
 
 	// Validate UUID format
@@ -242,7 +261,7 @@ func (h *ImageHandler) downloadImage(c *gin.Context, resolution string) {
 	}
 
 	// Get image stream from service
-	stream, metadata, err := h.imageService.GetImageStream(ctx, imageID, resolution)
+	stream, metadata, err := h.imageService.GetImageStream(ctx, imageID, resolution, format)
 	if err != nil {
 		h.handleServiceError(c, err, requestID, "get image stream failed")
 		return
@@ -266,6 +285,7 @@ func (h *ImageHandler) downloadImage(c *gin.Context, resolution string) {
 			zap.Error(err),
 			zap.String("image_id", imageID),
 			zap.String("resolution", resolution),
+			zap.String("format", format),
 			zap.String("request_id", requestID))
 		return
 	}
@@ -404,4 +424,16 @@ func (h *ImageHandler) isValidCustomResolution(resolution string) bool {
 	}
 
 	return true
+}
+
+func (h *ImageHandler) isValidFormat(format string) bool {
+	// Validate format type
+	allowedFormats := []string{
+		"jpeg",
+		"png",
+		"gif",
+		"webp",
+	}
+
+	return slices.Contains(allowedFormats, format)
 }

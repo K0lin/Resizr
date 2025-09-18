@@ -98,21 +98,7 @@ func (p *ProcessorServiceImpl) GetDimensions(data []byte) (width, height int, er
 		return 0, 0, fmt.Errorf("failed to decode image for dimensions: %w", err)
 	}
 
-	bounds := img.Bounds()
-	width = bounds.Dx()
-	height = bounds.Dy()
-
-	// Validate dimensions
-	if width <= 0 || height <= 0 {
-		return 0, 0, fmt.Errorf("invalid image dimensions: %dx%d", width, height)
-	}
-
-	if width > p.maxImageDimension || height > p.maxImageDimension {
-		return 0, 0, fmt.Errorf("image dimensions %dx%d exceed maximum allowed %dx%d",
-			width, height, p.maxImageDimension, p.maxImageDimension)
-	}
-
-	return width, height, nil
+	return p.getImageDimensions(img)
 }
 
 // ProcessImage resizes image to specified resolution
@@ -173,6 +159,44 @@ func (p *ProcessorServiceImpl) ProcessImage(data []byte, config ResizeConfig) ([
 		zap.String("format", format))
 
 	return processedData, nil
+}
+
+// ConvertImage converts image to another format
+func (p *ProcessorServiceImpl) ConvertImage(data []byte, config ConvertConfig) ([]byte, error) {
+	logger.Debug("Converting image",
+		zap.String("target_format", config.Format),
+		zap.Int("target_quality", config.Quality),
+	)
+
+	// Decode original image
+	srcImage, format, err := p.decodeImage(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode source image: %w", err)
+	}
+
+	if format != config.Format {
+		return nil, fmt.Errorf("expected different from %s format", format)
+	}
+
+	// Validate image dimensions
+	width, height, err := p.getImageDimensions(srcImage)
+	if err != nil {
+		return nil, fmt.Errorf("invalid image dimensions: %w", err)
+	}
+
+	// Encode to another format
+	convertedData, err := p.encodeImage(srcImage, config.Format, config.Quality)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode processed image: %w", err)
+	}
+
+	logger.Debug("Image conversion successed",
+		zap.String("format", config.Format),
+		zap.Int("width", width),
+		zap.Int("height", height),
+	)
+
+	return convertedData, nil
 }
 
 // ValidateImage checks if image data is valid
@@ -335,6 +359,25 @@ func (p *ProcessorServiceImpl) cropResize(src image.Image, targetWidth, targetHe
 	cropped := imaging.CropCenter(resized, targetWidth, targetHeight)
 
 	return cropped
+}
+
+// getIageDimensions returns dimensions of decoded image
+func (p *ProcessorServiceImpl) getImageDimensions(img image.Image) (width, height int, err error) {
+	bounds := img.Bounds()
+	width = bounds.Dx()
+	height = bounds.Dy()
+
+	// Validate dimensions
+	if width <= 0 || height <= 0 {
+		return 0, 0, fmt.Errorf("invalid image dimensions: %dx%d", width, height)
+	}
+
+	if width > p.maxImageDimension || height > p.maxImageDimension {
+		return 0, 0, fmt.Errorf("image dimensions %dx%d exceed maximum allowed %dx%d",
+			width, height, p.maxImageDimension, p.maxImageDimension)
+	}
+
+	return width, height, nil
 }
 
 // GetSupportedFormats returns list of supported image formats

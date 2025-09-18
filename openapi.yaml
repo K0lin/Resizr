@@ -458,6 +458,63 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/images/{id}/convert/{type}:
+    get:
+      tags:
+        - Images
+      summary:
+        Download custom image format
+      description: |
+        Download a custom resolution version of the image.
+        
+        **Resolution Format:**
+        - Must match pattern: WIDTHxHEIGHT (e.g., "800x600", "1200x900")
+        - Both width and height must be positive integers
+        - Maximum dimension: 10,000 pixels
+        - Resolution must have been requested during upload
+        
+        **Processing:**
+        - Smart-fit algorithm maintains aspect ratio
+        - White background for letterboxing/pillarboxing
+        - Quality optimized for resolution size
+        
+      operationId: downloadCustomResolution
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+        - $ref: '#/components/parameters/Format'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Custom format image
+          headers:
+            Content-Type:
+              schema:
+                type: string
+              example: "image/jpeg"
+            Content-Length:
+              schema:
+                type: integer
+              example: 131072
+            Cache-Control:
+              schema:
+                type: string
+              example: "public, max-age=31536000, immutable"
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        '304':
+          $ref: '#/components/responses/NotModified'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /health:
     get:
       tags:
@@ -576,6 +633,16 @@ components:
       schema:
         type: string
       example: "bytes=0-1023"
+
+    Format:
+      name: Format
+      in: path
+      required: true
+      description: Format type of the image
+      schema:
+        type: string
+        enum: ["jpeg", "png", "gif", "webp"]
+      example: "jpeg"
 
   schemas:
     UploadResponse:

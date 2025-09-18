@@ -16,7 +16,7 @@ type ImageService interface {
 	GetMetadata(ctx context.Context, imageID string) (*models.ImageMetadata, error)
 
 	// GetImageStream retrieves image data as a stream
-	GetImageStream(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error)
+	GetImageStream(ctx context.Context, imageID, resolution, format string) (io.ReadCloser, *models.ImageMetadata, error)
 
 	// ProcessResolution generates a specific resolution for an existing image
 	ProcessResolution(ctx context.Context, imageID, resolution string) error
@@ -48,6 +48,9 @@ type ProcessorService interface {
 	// ProcessImage resizes image to specified resolution
 	ProcessImage(data []byte, config ResizeConfig) ([]byte, error)
 
+	// ConvertImage converts image to curtain format
+	ConvertImage(data []byte, config ConvertConfig) ([]byte, error)
+
 	// ValidateImage checks if image data is valid
 	ValidateImage(data []byte, maxSize int64) error
 }
@@ -78,6 +81,12 @@ type ResizeConfig struct {
 	Format          string     `json:"format"`
 	Mode            ResizeMode `json:"mode"`
 	BackgroundColor string     `json:"background_color"`
+}
+
+// ConvertConfig represents image conversion configuration
+type ConvertConfig struct {
+	Quality int    `json:"quality"`
+	Format  string `json:"format"`
 }
 
 // ResizeMode defines how image should be resized
