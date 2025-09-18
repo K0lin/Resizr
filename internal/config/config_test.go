@@ -13,9 +13,9 @@ func TestLoad_DefaultValues(t *testing.T) {
 	clearEnv()
 
 	// Set required values
-	os.Setenv("S3_BUCKET", "test-bucket")
-	os.Setenv("S3_ACCESS_KEY", "test-key")
-	os.Setenv("S3_SECRET_KEY", "test-secret")
+	_ = os.Setenv("S3_BUCKET", "test-bucket")
+	_ = os.Setenv("S3_ACCESS_KEY", "test-key")
+	_ = os.Setenv("S3_SECRET_KEY", "test-secret")
 	defer clearEnv()
 
 	config, err := Load()
@@ -100,7 +100,7 @@ func TestLoad_CustomValues(t *testing.T) {
 	}
 
 	for key, value := range envVars {
-		os.Setenv(key, value)
+		_ = os.Setenv(key, value)
 	}
 	defer clearEnv()
 
@@ -550,19 +550,19 @@ func TestIsSupportedFormat(t *testing.T) {
 
 func TestGetEnvHelpers(t *testing.T) {
 	t.Run("getEnv", func(t *testing.T) {
-		os.Setenv("TEST_STRING", "test_value")
-		defer os.Unsetenv("TEST_STRING")
+		_ = os.Setenv("TEST_STRING", "test_value")
+		defer func() { _ = os.Unsetenv("TEST_STRING") }()
 
 		assert.Equal(t, "test_value", getEnv("TEST_STRING", "default"))
 		assert.Equal(t, "default", getEnv("NONEXISTENT", "default"))
 	})
 
 	t.Run("getEnvInt", func(t *testing.T) {
-		os.Setenv("TEST_INT", "123")
-		os.Setenv("TEST_INT_INVALID", "not_a_number")
+		_ = os.Setenv("TEST_INT", "123")
+		_ = os.Setenv("TEST_INT_INVALID", "not_a_number")
 		defer func() {
-			os.Unsetenv("TEST_INT")
-			os.Unsetenv("TEST_INT_INVALID")
+			_ = os.Unsetenv("TEST_INT")
+			_ = os.Unsetenv("TEST_INT_INVALID")
 		}()
 
 		assert.Equal(t, 123, getEnvInt("TEST_INT", 456))
@@ -571,13 +571,13 @@ func TestGetEnvHelpers(t *testing.T) {
 	})
 
 	t.Run("getEnvBool", func(t *testing.T) {
-		os.Setenv("TEST_BOOL_TRUE", "true")
-		os.Setenv("TEST_BOOL_FALSE", "false")
-		os.Setenv("TEST_BOOL_INVALID", "not_a_bool")
+		_ = os.Setenv("TEST_BOOL_TRUE", "true")
+		_ = os.Setenv("TEST_BOOL_FALSE", "false")
+		_ = os.Setenv("TEST_BOOL_INVALID", "not_a_bool")
 		defer func() {
-			os.Unsetenv("TEST_BOOL_TRUE")
-			os.Unsetenv("TEST_BOOL_FALSE")
-			os.Unsetenv("TEST_BOOL_INVALID")
+			_ = os.Unsetenv("TEST_BOOL_TRUE")
+			_ = os.Unsetenv("TEST_BOOL_FALSE")
+			_ = os.Unsetenv("TEST_BOOL_INVALID")
 		}()
 
 		assert.True(t, getEnvBool("TEST_BOOL_TRUE", false))
@@ -587,11 +587,11 @@ func TestGetEnvHelpers(t *testing.T) {
 	})
 
 	t.Run("getEnvFloat", func(t *testing.T) {
-		os.Setenv("TEST_FLOAT", "123.45")
-		os.Setenv("TEST_FLOAT_INVALID", "not_a_float")
+		_ = os.Setenv("TEST_FLOAT", "123.45")
+		_ = os.Setenv("TEST_FLOAT_INVALID", "not_a_float")
 		defer func() {
-			os.Unsetenv("TEST_FLOAT")
-			os.Unsetenv("TEST_FLOAT_INVALID")
+			_ = os.Unsetenv("TEST_FLOAT")
+			_ = os.Unsetenv("TEST_FLOAT_INVALID")
 		}()
 
 		assert.Equal(t, 123.45, getEnvFloat("TEST_FLOAT", 678.90))
@@ -600,11 +600,11 @@ func TestGetEnvHelpers(t *testing.T) {
 	})
 
 	t.Run("getEnvDuration", func(t *testing.T) {
-		os.Setenv("TEST_DURATION", "5m")
-		os.Setenv("TEST_DURATION_INVALID", "not_a_duration")
+		_ = os.Setenv("TEST_DURATION", "5m")
+		_ = os.Setenv("TEST_DURATION_INVALID", "not_a_duration")
 		defer func() {
-			os.Unsetenv("TEST_DURATION")
-			os.Unsetenv("TEST_DURATION_INVALID")
+			_ = os.Unsetenv("TEST_DURATION")
+			_ = os.Unsetenv("TEST_DURATION_INVALID")
 		}()
 
 		assert.Equal(t, 5*time.Minute, getEnvDuration("TEST_DURATION", time.Hour))
@@ -613,13 +613,13 @@ func TestGetEnvHelpers(t *testing.T) {
 	})
 
 	t.Run("getEnvStringSlice", func(t *testing.T) {
-		os.Setenv("TEST_SLICE", "a,b,c")
-		os.Setenv("TEST_SLICE_SPACES", " a , b , c ")
-		os.Setenv("TEST_SLICE_EMPTY", "")
+		_ = os.Setenv("TEST_SLICE", "a,b,c")
+		_ = os.Setenv("TEST_SLICE_SPACES", " a , b , c ")
+		_ = os.Setenv("TEST_SLICE_EMPTY", "")
 		defer func() {
-			os.Unsetenv("TEST_SLICE")
-			os.Unsetenv("TEST_SLICE_SPACES")
-			os.Unsetenv("TEST_SLICE_EMPTY")
+			_ = os.Unsetenv("TEST_SLICE")
+			_ = os.Unsetenv("TEST_SLICE_SPACES")
+			_ = os.Unsetenv("TEST_SLICE_EMPTY")
 		}()
 
 		assert.Equal(t, []string{"a", "b", "c"}, getEnvStringSlice("TEST_SLICE", []string{"default"}))
@@ -644,7 +644,7 @@ func TestLoad_ValidationError(t *testing.T) {
 	clearEnv()
 
 	// Set incomplete configuration (missing required S3 fields)
-	os.Setenv("S3_BUCKET", "test-bucket")
+	_ = os.Setenv("S3_BUCKET", "test-bucket")
 	// Missing S3_ACCESS_KEY and S3_SECRET_KEY
 	defer clearEnv()
 
@@ -712,7 +712,7 @@ func clearEnv() {
 	}
 
 	for _, env := range envVars {
-		os.Unsetenv(env)
+		_ = os.Unsetenv(env)
 	}
 }
 
@@ -756,13 +756,13 @@ func TestS3HealthCheckInterval_MinimumLimit(t *testing.T) {
 
 			// Set test value if provided
 			if tt.envValue != "" {
-				os.Setenv("S3_HEALTHCHECKS_INTERVAL", tt.envValue)
+				_ = os.Setenv("S3_HEALTHCHECKS_INTERVAL", tt.envValue)
 			}
 
 			// Set required config values
-			os.Setenv("S3_BUCKET", "test-bucket")
-			os.Setenv("S3_ACCESS_KEY", "test-key")
-			os.Setenv("S3_SECRET_KEY", "test-secret")
+			_ = os.Setenv("S3_BUCKET", "test-bucket")
+			_ = os.Setenv("S3_ACCESS_KEY", "test-key")
+			_ = os.Setenv("S3_SECRET_KEY", "test-secret")
 
 			defer clearEnv()
 
@@ -813,13 +813,13 @@ func TestHealthCheckInterval_MinimumLimit(t *testing.T) {
 
 			// Set test value if provided
 			if tt.envValue != "" {
-				os.Setenv("HEALTHCHECK_INTERVAL", tt.envValue)
+				_ = os.Setenv("HEALTHCHECK_INTERVAL", tt.envValue)
 			}
 
 			// Set required config values
-			os.Setenv("S3_BUCKET", "test-bucket")
-			os.Setenv("S3_ACCESS_KEY", "test-key")
-			os.Setenv("S3_SECRET_KEY", "test-secret")
+			_ = os.Setenv("S3_BUCKET", "test-bucket")
+			_ = os.Setenv("S3_ACCESS_KEY", "test-key")
+			_ = os.Setenv("S3_SECRET_KEY", "test-secret")
 
 			defer clearEnv()
 
@@ -888,7 +888,7 @@ func TestLoad_AuthConfiguration(t *testing.T) {
 
 			// Set environment variables
 			for key, value := range tt.envVars {
-				os.Setenv(key, value)
+				_ = os.Setenv(key, value)
 			}
 			defer clearEnv()
 

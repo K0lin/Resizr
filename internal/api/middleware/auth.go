@@ -87,7 +87,7 @@ func RequirePermission(required string) gin.HandlerFunc {
 		// Skip permission check if auth is disabled
 		cfg, exists := c.Get("config")
 		if exists {
-			if config, ok := cfg.(*config.Config); ok && !config.Auth.Enabled {
+			if configData, ok := cfg.(*config.Config); ok && !configData.Auth.Enabled {
 				c.Next()
 				return
 			}
