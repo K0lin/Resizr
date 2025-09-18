@@ -15,6 +15,7 @@ type Router struct {
 	config        *config.Config
 	imageHandler  *handlers.ImageHandler
 	healthHandler *handlers.HealthHandler
+	authHandler   *handlers.AuthHandler
 }
 
 // NewRouter creates a new HTTP router with all routes configured
@@ -31,12 +32,14 @@ func NewRouter(cfg *config.Config, imageService service.ImageService, healthServ
 	// Create handlers
 	imageHandler := handlers.NewImageHandler(imageService, cfg)
 	healthHandler := handlers.NewHealthHandler(healthService)
+	authHandler := handlers.NewAuthHandler(cfg)
 
 	router := &Router{
 		engine:        engine,
 		config:        cfg,
 		imageHandler:  imageHandler,
 		healthHandler: healthHandler,
+		authHandler:   authHandler,
 	}
 
 	// Setup middleware and routes
@@ -67,33 +70,39 @@ func (r *Router) setupMiddleware() {
 
 // setupRoutes configures all API routes
 func (r *Router) setupRoutes() {
-	// Health check endpoint (no prefix)
+	// Health check endpoint (no prefix, no auth)
 	r.engine.GET("/health", r.healthHandler.Health)
 
 	// API v1 routes
 	v1 := r.engine.Group("/api/v1")
 	{
-		// Image endpoints
-		images := v1.Group("/images")
+		// Authentication endpoints (no auth required)
+		auth := v1.Group("/auth")
 		{
-			// Upload image
-			images.POST("", r.imageHandler.Upload)
+			auth.GET("/generate-key", r.authHandler.GenerateAPIKey)
+			auth.GET("/status", r.authHandler.GetAuthStatus)
+		}
 
-			// Image info and downloads
-			images.GET("/:id/info", r.imageHandler.Info)
-			images.GET("/:id/original", r.imageHandler.DownloadOriginal)
-			images.GET("/:id/thumbnail", r.imageHandler.DownloadThumbnail)
+		// Image endpoints (with authentication)
+		images := v1.Group("/images")
+		images.Use(middleware.APIKeyAuth(r.config))
+		{
+			// Write operations (require read-write permission)
+			images.POST("", middleware.RequirePermission(middleware.PermissionReadWrite), r.imageHandler.Upload)
 
-			// Presigned URL generation (must come before custom resolution to avoid conflicts)
-			images.GET("/:id/original/presigned-url", r.imageHandler.GeneratePresignedURL)
-			images.GET("/:id/thumbnail/presigned-url", r.imageHandler.GeneratePresignedURL)
-			images.GET("/:id/:resolution/presigned-url", r.imageHandler.GeneratePresignedURL)
+			// Read operations (require read permission - both read-only and read-write keys work)
+			images.GET("/:id/info", middleware.RequirePermission(middleware.PermissionRead), r.imageHandler.Info)
+			images.GET("/:id/original", middleware.RequirePermission(middleware.PermissionRead), r.imageHandler.DownloadOriginal)
+			images.GET("/:id/thumbnail", middleware.RequirePermission(middleware.PermissionRead), r.imageHandler.DownloadThumbnail)
+			images.GET("/:id/:resolution", middleware.RequirePermission(middleware.PermissionRead), r.imageHandler.DownloadCustomResolution)
 
-			// Custom resolution download (must come last due to wildcard)
-			images.GET("/:id/:resolution", r.imageHandler.DownloadCustomResolution)
+			// Presigned URL generation (require read permission)
+			images.GET("/:id/original/presigned-url", middleware.RequirePermission(middleware.PermissionRead), r.imageHandler.GeneratePresignedURL)
+			images.GET("/:id/thumbnail/presigned-url", middleware.RequirePermission(middleware.PermissionRead), r.imageHandler.GeneratePresignedURL)
+			images.GET("/:id/:resolution/presigned-url", middleware.RequirePermission(middleware.PermissionRead), r.imageHandler.GeneratePresignedURL)
 
-			// Optional: Delete image (future feature)
-			// images.DELETE("/:id", middleware.Auth(), r.imageHandler.Delete)
+			// Future: Delete image (require read-write permission)
+			// images.DELETE("/:id", middleware.RequirePermission(middleware.PermissionReadWrite), r.imageHandler.Delete)
 		}
 	}
 

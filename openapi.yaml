@@ -13,7 +13,13 @@ info:
     - Rate limiting and security features
     
     ## Authentication
-    Currently, no authentication is required. Future versions will support JWT bearer tokens.
+    RESIZR supports optional API key-based authentication with two permission levels:
+    
+    - **Read-Write Keys**: Can upload images and access all read operations
+    - **Read-Only Keys**: Can only access download and info operations
+    
+    Authentication is disabled by default and can be enabled via configuration.
+    When enabled, API keys must be provided in the `X-API-Key` header (configurable).
     
     ## Rate Limits
     - Upload: 10 requests/minute per IP
@@ -32,27 +38,98 @@ info:
   version: 0.0.1
   contact:
     name: RESIZR API Support
-    email: support@resizr.dev
-    url: https://github.com/your-org/resizr
+    url: https://github.com/k0lin/resizr
   license:
-    name: MIT
-    url: https://opensource.org/licenses/MIT
+    name: Apache-2-0
+    url: https://opensource.org/licenses/apache-2-0
 
 servers:
-  - url: https://api.resizr.dev
-    description: Production server
-  - url: https://staging.resizr.dev
-    description: Staging server
   - url: http://localhost:8080
     description: Development server
 
 tags:
+  - name: Authentication
+    description: API key generation and authentication status
   - name: Images
     description: Image upload, processing, and delivery operations
   - name: Health
     description: Service health and monitoring endpoints
 
 paths:
+  /api/v1/auth/generate-key:
+    get:
+      tags:
+        - Authentication
+      summary: Generate API key
+      description: |
+        Generate a new cryptographically secure API key.
+        
+        **Permission Assignment:** The key's permission level is determined by which environment variable it's added to:
+        - Add to `AUTH_READWRITE_KEYS` for full access (uploads, downloads, info)
+        - Add to `AUTH_READONLY_KEYS` for read-only access (downloads, info only)
+        
+        **Note:** Generated keys must be manually added to environment configuration to become active.
+        
+      operationId: generateAPIKey
+      responses:
+        '201':
+          description: API key generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_key:
+                    type: string
+                    description: Generated API key (64-character hex string)
+                    example: a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
+                  message:
+                    type: string
+                    description: Success message with configuration instructions
+                    example: API key generated successfully. Add it to AUTH_READWRITE_KEYS or AUTH_READONLY_KEYS environment variable to activate.
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/status:
+    get:
+      tags:
+        - Authentication
+      summary: Get authentication status
+      description: |
+        Get current authentication configuration status.
+        
+        Returns information about whether authentication is enabled and key counts.
+        
+      operationId: getAuthStatus
+      responses:
+        '200':
+          description: Authentication status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  auth_enabled:
+                    type: boolean
+                    description: Whether authentication is currently enabled
+                    example: true
+                  key_header:
+                    type: string
+                    description: HTTP header name used for API keys
+                    example: X-API-Key
+                  read_write_keys_count:
+                    type: integer
+                    description: Number of configured read-write keys (only shown if auth enabled)
+                    example: 2
+                  read_only_keys_count:
+                    type: integer
+                    description: Number of configured read-only keys (only shown if auth enabled)
+                    example: 3
+
   /api/v1/images:
     post:
       tags:
@@ -74,6 +151,8 @@ paths:
         **Processing time:** Typically 200-500ms depending on image size
         
       operationId: uploadImage
+      security:
+        - ApiKeyAuth: []
       requestBody:
         required: true
         content:
@@ -160,6 +239,8 @@ paths:
         This endpoint is lightweight and fast (~10ms response time).
         
       operationId: getImageInfo
+      security:
+        - ApiKeyAuth: []
       parameters:
         - $ref: '#/components/parameters/ImageId'
       responses:
@@ -569,6 +650,18 @@ paths:
           description: Metrics endpoint not available (production mode)
 
 components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key authentication. Required when authentication is enabled.
+        
+        Two types of keys are supported:
+        - **Read-Write Keys**: Can upload images and access all read operations
+        - **Read-Only Keys**: Can only access download and info operations
+
   parameters:
     ImageId:
       name: id
@@ -1009,4 +1102,4 @@ security: []
 
 externalDocs:
   description: RESIZR Documentation
-  url: https://github.com/your-org/resizr/blob/main/docs/new_docs/README.md
+  url: https://github.com/k0lin/resizr/blob/main/README.md

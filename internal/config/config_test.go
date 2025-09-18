@@ -48,6 +48,10 @@ func TestLoad_DefaultValues(t *testing.T) {
 	assert.Equal(t, 10, config.RateLimit.Upload)
 	assert.Equal(t, 100, config.RateLimit.Download)
 	assert.Equal(t, 50, config.RateLimit.Info)
+	assert.False(t, config.Auth.Enabled)
+	assert.Empty(t, config.Auth.ReadWriteKeys)
+	assert.Empty(t, config.Auth.ReadOnlyKeys)
+	assert.Equal(t, "X-API-Key", config.Auth.KeyHeader)
 	assert.Equal(t, "info", config.Logger.Level)
 	assert.Equal(t, "json", config.Logger.Format)
 	assert.True(t, config.CORS.Enabled)
@@ -704,6 +708,7 @@ func clearEnv() {
 		"RATE_LIMIT_UPLOAD", "RATE_LIMIT_DOWNLOAD", "RATE_LIMIT_INFO", "LOG_LEVEL", "LOG_FORMAT",
 		"CORS_ENABLED", "CORS_ALLOW_ALL_ORIGINS", "CORS_ALLOWED_ORIGINS", "CORS_ALLOW_CREDENTIALS",
 		"S3_HEALTHCHECKS_DISABLE", "S3_HEALTHCHECKS_INTERVAL", "HEALTHCHECK_INTERVAL",
+		"AUTH_ENABLED", "AUTH_READWRITE_KEYS", "AUTH_READONLY_KEYS", "AUTH_KEY_HEADER",
 	}
 
 	for _, env := range envVars {
@@ -821,6 +826,81 @@ func TestHealthCheckInterval_MinimumLimit(t *testing.T) {
 			config, err := Load()
 			assert.NoError(t, err)
 			assert.Equal(t, tt.expectedResult, config.Health.CheckInterval, tt.description)
+		})
+	}
+}
+
+func TestLoad_AuthConfiguration(t *testing.T) {
+	tests := []struct {
+		name              string
+		envVars           map[string]string
+		expectedEnabled   bool
+		expectedRWKeys    []string
+		expectedROKeys    []string
+		expectedKeyHeader string
+	}{
+		{
+			name: "auth disabled by default",
+			envVars: map[string]string{
+				"S3_BUCKET":     "test-bucket",
+				"S3_ACCESS_KEY": "test-key",
+				"S3_SECRET_KEY": "test-secret",
+			},
+			expectedEnabled:   false,
+			expectedRWKeys:    []string{},
+			expectedROKeys:    []string{},
+			expectedKeyHeader: "X-API-Key",
+		},
+		{
+			name: "auth enabled with keys",
+			envVars: map[string]string{
+				"S3_BUCKET":           "test-bucket",
+				"S3_ACCESS_KEY":       "test-key",
+				"S3_SECRET_KEY":       "test-secret",
+				"AUTH_ENABLED":        "true",
+				"AUTH_READWRITE_KEYS": "rw-key-1,rw-key-2",
+				"AUTH_READONLY_KEYS":  "ro-key-1,ro-key-2,ro-key-3",
+				"AUTH_KEY_HEADER":     "Authorization",
+			},
+			expectedEnabled:   true,
+			expectedRWKeys:    []string{"rw-key-1", "rw-key-2"},
+			expectedROKeys:    []string{"ro-key-1", "ro-key-2", "ro-key-3"},
+			expectedKeyHeader: "Authorization",
+		},
+		{
+			name: "auth enabled without keys",
+			envVars: map[string]string{
+				"S3_BUCKET":     "test-bucket",
+				"S3_ACCESS_KEY": "test-key",
+				"S3_SECRET_KEY": "test-secret",
+				"AUTH_ENABLED":  "true",
+			},
+			expectedEnabled:   true,
+			expectedRWKeys:    []string{},
+			expectedROKeys:    []string{},
+			expectedKeyHeader: "X-API-Key",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv()
+
+			// Set environment variables
+			for key, value := range tt.envVars {
+				os.Setenv(key, value)
+			}
+			defer clearEnv()
+
+			config, err := Load()
+			assert.NoError(t, err)
+			assert.NotNil(t, config)
+
+			// Verify auth configuration
+			assert.Equal(t, tt.expectedEnabled, config.Auth.Enabled)
+			assert.Equal(t, tt.expectedRWKeys, config.Auth.ReadWriteKeys)
+			assert.Equal(t, tt.expectedROKeys, config.Auth.ReadOnlyKeys)
+			assert.Equal(t, tt.expectedKeyHeader, config.Auth.KeyHeader)
 		})
 	}
 }

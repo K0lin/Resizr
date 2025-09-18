@@ -135,7 +135,22 @@ func TestConfig() *config.Config {
 			S3ChecksInterval: 30 * time.Second,
 			CheckInterval:    30 * time.Second,
 		},
+		Auth: config.AuthConfig{
+			Enabled:       false, // Default to disabled for tests
+			ReadWriteKeys: []string{},
+			ReadOnlyKeys:  []string{},
+			KeyHeader:     "X-API-Key",
+		},
 	}
+}
+
+// TestConfigWithAuth returns a test configuration with authentication enabled
+func TestConfigWithAuth(readWriteKeys, readOnlyKeys []string) *config.Config {
+	cfg := TestConfig()
+	cfg.Auth.Enabled = true
+	cfg.Auth.ReadWriteKeys = readWriteKeys
+	cfg.Auth.ReadOnlyKeys = readOnlyKeys
+	return cfg
 }
 
 // CreateTestImageMetadata creates test image metadata
