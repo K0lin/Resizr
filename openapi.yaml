@@ -13,7 +13,13 @@ info:
     - Rate limiting and security features
     
     ## Authentication
-    Currently, no authentication is required. Future versions will support JWT bearer tokens.
+    RESIZR supports optional API key-based authentication with two permission levels:
+    
+    - **Read-Write Keys**: Can upload images and access all read operations
+    - **Read-Only Keys**: Can only access download and info operations
+    
+    Authentication is disabled by default and can be enabled via configuration.
+    When enabled, API keys must be provided in the `X-API-Key` header (configurable).
     
     ## Rate Limits
     - Upload: 10 requests/minute per IP
@@ -32,27 +38,98 @@ info:
   version: 0.0.1
   contact:
     name: RESIZR API Support
-    email: support@resizr.dev
-    url: https://github.com/your-org/resizr
+    url: https://github.com/k0lin/resizr
   license:
-    name: MIT
-    url: https://opensource.org/licenses/MIT
+    name: Apache-2-0
+    url: https://opensource.org/licenses/apache-2-0
 
 servers:
-  - url: https://api.resizr.dev
-    description: Production server
-  - url: https://staging.resizr.dev
-    description: Staging server
   - url: http://localhost:8080
     description: Development server
 
 tags:
+  - name: Authentication
+    description: API key generation and authentication status
   - name: Images
     description: Image upload, processing, and delivery operations
   - name: Health
     description: Service health and monitoring endpoints
 
 paths:
+  /api/v1/auth/generate-key:
+    get:
+      tags:
+        - Authentication
+      summary: Generate API key
+      description: |
+        Generate a new cryptographically secure API key.
+        
+        **Permission Assignment:** The key's permission level is determined by which environment variable it's added to:
+        - Add to `AUTH_READWRITE_KEYS` for full access (uploads, downloads, info)
+        - Add to `AUTH_READONLY_KEYS` for read-only access (downloads, info only)
+        
+        **Note:** Generated keys must be manually added to environment configuration to become active.
+        
+      operationId: generateAPIKey
+      responses:
+        '201':
+          description: API key generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_key:
+                    type: string
+                    description: Generated API key (64-character hex string)
+                    example: a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
+                  message:
+                    type: string
+                    description: Success message with configuration instructions
+                    example: API key generated successfully. Add it to AUTH_READWRITE_KEYS or AUTH_READONLY_KEYS environment variable to activate.
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/status:
+    get:
+      tags:
+        - Authentication
+      summary: Get authentication status
+      description: |
+        Get current authentication configuration status.
+        
+        Returns information about whether authentication is enabled and key counts.
+        
+      operationId: getAuthStatus
+      responses:
+        '200':
+          description: Authentication status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  auth_enabled:
+                    type: boolean
+                    description: Whether authentication is currently enabled
+                    example: true
+                  key_header:
+                    type: string
+                    description: HTTP header name used for API keys
+                    example: X-API-Key
+                  read_write_keys_count:
+                    type: integer
+                    description: Number of configured read-write keys (only shown if auth enabled)
+                    example: 2
+                  read_only_keys_count:
+                    type: integer
+                    description: Number of configured read-only keys (only shown if auth enabled)
+                    example: 3
+
   /api/v1/images:
     post:
       tags:
@@ -64,7 +141,7 @@ paths:
         The service will:
         1. Validate the uploaded file (format, size, etc.)
         2. Generate a unique UUID for the image
-        3. Process default resolutions (thumbnail, preview) if enabled via GENERATE_DEFAULT_RESOLUTIONS
+        3. Process default resolutions (thumbnail) if enabled via GENERATE_DEFAULT_RESOLUTIONS
         4. Process any requested custom resolutions
         5. Store all versions in S3-compatible storage
         6. Save metadata to Redis
@@ -74,6 +151,8 @@ paths:
         **Processing time:** Typically 200-500ms depending on image size
         
       operationId: uploadImage
+      security:
+        - ApiKeyAuth: []
       requestBody:
         required: true
         content:
@@ -98,7 +177,7 @@ paths:
                     Optional array of custom resolutions to generate.
                     Format: "WIDTHxHEIGHT" (e.g., ["800x600", "1200x900"])
                     Supports multiple form fields or comma-separated values in a single field.
-                    Maximum dimension: 10,000 pixels
+                    Maximum dimension (hard cap): 8,192 pixels. Default is 4,096 and configurable via IMAGE_MAX_WIDTH and IMAGE_MAX_HEIGHT up to the hard cap.
                   example: ["800x600", "1200x900"]
             encoding:
               image:
@@ -130,7 +209,7 @@ paths:
               example:
                 id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
                 message: "Image uploaded successfully"
-                resolutions: ["original", "thumbnail", "preview", "800x600", "1200x900"]
+                resolutions: ["original", "thumbnail", "800x600", "1200x900"]
         '400':
           $ref: '#/components/responses/BadRequest'
         '413':
@@ -154,12 +233,14 @@ paths:
       description: |
         Retrieve comprehensive metadata for an uploaded image, including:
         - File information (name, size, format, dimensions)
-        - Available resolutions (original, thumbnail, preview, custom)
+        - Available resolutions (original, thumbnail, custom)
         - Upload and modification timestamps
         
         This endpoint is lightweight and fast (~10ms response time).
         
       operationId: getImageInfo
+      security:
+        - ApiKeyAuth: []
       parameters:
         - $ref: '#/components/parameters/ImageId'
       responses:
@@ -196,8 +277,77 @@ paths:
                 dimensions:
                   width: 1920
                   height: 1080
-                available_resolutions: ["original", "thumbnail", "preview", "800x600", "1200x900"]
+                available_resolutions: ["original", "thumbnail", "800x600", "1200x900"]
                 created_at: "2025-09-11T10:30:00Z"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/images/{id}/{resolution}/presigned-url:
+    get:
+      tags:
+        - Images
+      summary: Generate presigned URL
+      description: |
+        Generate a temporary presigned URL for direct access to image files stored in S3.
+        
+        **Features:**
+        - Direct client-side access to S3 without server proxy
+        - Configurable expiration time (default: 1 hour, max: 7 days)
+        - Support for all available image resolutions
+        - Reduces server bandwidth and improves performance
+        - Consistent with existing download endpoint structure
+        
+        **Use Cases:**
+        - Mobile app integration with direct S3 access
+        - Temporary image sharing with expiration
+        - Client-side downloads for large images
+        - CDN integration and caching optimization
+        
+      operationId: generatePresignedURL
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+        - $ref: '#/components/parameters/Resolution'
+        - name: expires_in
+          in: query
+          required: false
+          description: "URL expiration time in seconds (default: 3600, max: 604800)"
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 604800
+            default: 3600
+          example: 3600
+      responses:
+        '200':
+          description: Presigned URL generated successfully
+          headers:
+            X-Request-ID:
+              schema:
+                type: string
+                format: uuid
+              description: Unique request identifier for tracing
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+              description: CORS allowed origin
+            Access-Control-Expose-Headers:
+              schema:
+                type: string
+              description: Headers exposed to the client
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignedURLResponse'
+              example:
+                url: "https://bucket.s3.amazonaws.com/images/f47ac10b-58cc-4372-a567-0e02b2c3d479/thumbnail.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=..."
+                expires_at: "2025-09-12T16:30:00Z"
+                expires_in: 3600
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -346,53 +496,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /api/v1/images/{id}/preview:
-    get:
-      tags:
-        - Images
-      summary: Download preview
-      description: |
-        Download an 800x600 pixel preview version of the image.
-        
-        **Processing:**
-        - Smart-fit algorithm maintains aspect ratio
-        - White background for letterboxing/pillarboxing
-        - Balanced compression for quality and size
-        
-      operationId: downloadPreview
-      parameters:
-        - $ref: '#/components/parameters/ImageId'
-        - $ref: '#/components/parameters/IfNoneMatch'
-      responses:
-        '200':
-          description: Preview image (800x600)
-          headers:
-            Content-Type:
-              schema:
-                type: string
-              example: "image/jpeg"
-            Content-Length:
-              schema:
-                type: integer
-              example: 65536
-            Cache-Control:
-              schema:
-                type: string
-              example: "public, max-age=31536000, immutable"
-          content:
-            image/*:
-              schema:
-                type: string
-                format: binary
-        '304':
-          $ref: '#/components/responses/NotModified'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
   /api/v1/images/{id}/{resolution}:
     get:
       tags:
@@ -404,7 +507,7 @@ paths:
         **Resolution Format:**
         - Must match pattern: WIDTHxHEIGHT (e.g., "800x600", "1200x900")
         - Both width and height must be positive integers
-        - Maximum dimension: 10,000 pixels
+        - Maximum dimension (hard cap): 8,192 pixels. Default is 4,096 and configurable via IMAGE_MAX_WIDTH and IMAGE_MAX_HEIGHT up to the hard cap.
         - Resolution must have been requested during upload
         
         **Processing:**
@@ -604,6 +707,18 @@ paths:
           description: Metrics endpoint not available (production mode)
 
 components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key authentication. Required when authentication is enabled.
+        
+        Two types of keys are supported:
+        - **Read-Write Keys**: Can upload images and access all read operations
+        - **Read-Only Keys**: Can only access download and info operations
+
   parameters:
     ImageId:
       name: id
@@ -633,6 +748,16 @@ components:
       schema:
         type: string
       example: "bytes=0-1023"
+    
+    Resolution:
+      name: resolution
+      in: path
+      required: true
+      description: Image resolution/size
+      schema:
+        type: string
+        pattern: '^(original|thumbnail|[1-9]\d{0,3}x[1-9]\d{0,3})$'
+      example: "thumbnail"
 
     Format:
       name: Format
@@ -666,7 +791,7 @@ components:
           items:
             type: string
           description: List of available resolutions for this image
-          example: ["original", "thumbnail", "preview", "800x600", "1200x900"]
+          example: ["original", "thumbnail", "800x600", "1200x900"]
 
     InfoResponse:
       type: object
@@ -705,12 +830,34 @@ components:
           items:
             type: string
           description: List of available resolutions for this image
-          example: ["original", "thumbnail", "preview", "800x600", "1200x900"]
+          example: ["original", "thumbnail", "800x600", "1200x900"]
         created_at:
           type: string
           format: date-time
           description: Timestamp when the image was uploaded
           example: "2025-09-11T10:30:00Z"
+
+    PresignedURLResponse:
+      type: object
+      required:
+        - url
+        - expires_at
+        - expires_in
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Presigned URL for direct access to the image
+          example: "https://bucket.s3.amazonaws.com/images/f47ac10b-58cc-4372-a567-0e02b2c3d479/thumbnail.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=..."
+        expires_at:
+          type: string
+          format: date-time
+          description: Timestamp when the presigned URL expires
+          example: "2025-09-12T16:30:00Z"
+        expires_in:
+          type: integer
+          description: URL expiration time in seconds
+          example: 3600
 
     Dimensions:
       type: object
@@ -931,7 +1078,7 @@ components:
               summary: Resolution too large
               value:
                 error: "Processing failed"
-                message: "Requested resolution exceeds maximum dimension of 10,000 pixels"
+                message: "Requested resolution exceeds maximum dimension of 8,192 pixels"
                 code: 422
 
     TooManyRequests:
@@ -1022,4 +1169,4 @@ security: []
 
 externalDocs:
   description: RESIZR Documentation
-  url: https://github.com/your-org/resizr/blob/main/docs/new_docs/README.md
+  url: https://github.com/k0lin/resizr/blob/main/README.md

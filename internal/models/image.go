@@ -52,6 +52,13 @@ type InfoResponse struct {
 	CreatedAt            time.Time     `json:"created_at"`
 }
 
+// PresignedURLResponse represents the response for presigned URL endpoint
+type PresignedURLResponse struct {
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expires_at"`
+	ExpiresIn int       `json:"expires_in"` // seconds
+}
+
 // DimensionInfo represents image dimensions
 type DimensionInfo struct {
 	Width  int `json:"width"`
@@ -256,8 +263,6 @@ func ParseResolution(resolution string) (ResolutionConfig, error) {
 	switch resolution {
 	case "thumbnail":
 		return ResolutionConfig{Width: 150, Height: 150}, nil
-	case "preview":
-		return ResolutionConfig{Width: 800, Height: 600}, nil
 	case "original":
 		return ResolutionConfig{}, fmt.Errorf("original resolution cannot be parsed")
 	}
@@ -285,9 +290,7 @@ func ParseResolution(resolution string) (ResolutionConfig, error) {
 		return ResolutionConfig{}, fmt.Errorf("width and height must be positive")
 	}
 
-	if width > 10000 || height > 10000 {
-		return ResolutionConfig{}, fmt.Errorf("width and height cannot exceed 10000 pixels")
-	}
+	// Note: Business logic validation (max dimensions) is handled at the service layer
 
 	return ResolutionConfig{Width: width, Height: height}, nil
 }

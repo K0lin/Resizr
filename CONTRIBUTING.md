@@ -236,7 +236,8 @@ func ProcessImage(data []byte) error
 func validateImageFormat(data []byte) error
 
 // ✅ Good: Constants use descriptive names
-const MaxImageDimension = 10000
+const MaxImageWidth = 4096  // default, configurable via IMAGE_MAX_WIDTH
+const MaxImageHeight = 4096 // default, configurable via IMAGE_MAX_HEIGHT
 
 // ✅ Good: Interfaces end with -er when appropriate
 type ImageProcessor interface {
@@ -288,26 +289,30 @@ logger.Info(fmt.Sprintf("Processing %s", imageID))
 
 ### Project Structure
 
-Follow our established project structure:
-
-```
-internal/           # Private application code
-├── api/           # HTTP layer (handlers, middleware, routes)
-├── service/       # Business logic layer
-├── repository/    # Data access layer
-├── storage/       # Storage abstraction layer
-├── config/        # Configuration management
-└── models/        # Data models and types
-
-pkg/               # Public packages
-├── logger/        # Logging utilities
-└── utils/         # Shared utilities
-
-cmd/               # Application entry points
-└── server/        # HTTP server
-
-docs/              # Documentation
-test/              # Test files
+```text
+resizr/
+├── cmd/
+│   └── server/main.go           # Application entry point
+├── internal/                    # Private application code
+│   ├── api/                     # HTTP layer
+│   │   ├── handlers/            # HTTP handlers
+│   │   ├── middleware/          # HTTP middleware
+│   │   └── routes.go            # Route definitions
+│   ├── config/                  # Configuration management
+│   ├── models/                  # Data models
+│   ├── repository/              # Data access layer
+│   ├── service/                 # Business logic layer
+│   └── storage/                 # Storage abstraction layer
+├── pkg/                         # Public packages
+│   ├── logger/                  # Logging utilities
+│   └── utils/                   # Shared utilities
+├── docs/                        # Documentation
+├── test/                        # Test files
+├── docker/                      # Docker files
+├── .env.example                 # Environment template
+├── docker-compose.yml           # Local development setup
+├── go.mod                       # Go module definition
+└── Makefile                     # Development commands
 ```
 
 ### Code Organization
