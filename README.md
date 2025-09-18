@@ -106,6 +106,12 @@ CORS_ENABLED=true            # Enable/disable CORS middleware entirely
 CORS_ALLOW_ALL_ORIGINS=false # Allow all origins (*) - use with caution
 CORS_ALLOWED_ORIGINS=https://domain.com,https://example.com
 CORS_ALLOW_CREDENTIALS=false # Allow credentials in CORS requests
+
+# Authentication Configuration
+AUTH_ENABLED=false           # Enable/disable API key authentication (default: false)
+AUTH_KEY_HEADER=X-API-Key    # HTTP header name for API key (default: X-API-Key)
+AUTH_READWRITE_KEYS=rw_key_1,rw_key_2  # Comma-separated list of read-write API keys
+AUTH_READONLY_KEYS=ro_key_1,ro_key_2   # Comma-separated list of read-only API keys
 ```
 
 **Note on Resolution Processing:**
@@ -194,6 +200,58 @@ https://your-domain.com/api/v1
 | `GET` | `/images/{id}/{resolution}` | Download custom resolution | 100/min |
 | `GET` | `/images/{id}/{resolution}/presigned-url` | Generate presigned URL for direct access | 50/min |
 | `GET` | `/health` | Health check | Unlimited |
+
+### 🔐 Authentication
+
+RESIZR supports optional API key-based authentication with two permission levels:
+
+- **Read-Write Keys**: Can upload images and access all read operations
+- **Read-Only Keys**: Can only access download and info operations
+
+#### Authentication Endpoints (No Auth Required)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/auth/generate-key` | Generate new API key |
+| `GET` | `/auth/status` | Get authentication status |
+
+#### Enabling Authentication
+
+```bash
+# Enable authentication
+AUTH_ENABLED=true
+
+# Set API keys (comma-separated)
+AUTH_READWRITE_KEYS=your_rw_key_1,your_rw_key_2
+AUTH_READONLY_KEYS=your_ro_key_1,your_ro_key_2
+
+# Configure header name (optional, default: X-API-Key)
+AUTH_KEY_HEADER=X-API-Key
+```
+
+#### Using API Keys
+
+When authentication is enabled, include your API key in requests:
+
+```bash
+# Upload image (requires read-write key)
+curl -X POST http://localhost:8080/api/v1/images \
+  -H "X-API-Key: your_readwrite_api_key" \
+  -F "image=@test.jpg"
+
+# Download image (works with both read-write and read-only keys)
+curl -H "X-API-Key: your_api_key" \
+  http://localhost:8080/api/v1/images/{id}/thumbnail
+```
+
+#### Generate API Keys
+
+```bash
+# Generate an API key (works regardless of auth enabled/disabled)
+curl "http://localhost:8080/api/v1/auth/generate-key"
+```
+
+**Note**: Generated API keys must be manually added to your environment configuration to be active.
 
 See [OpenAPI Specification](openapi.yaml) for full API documentation.
 

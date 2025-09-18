@@ -22,6 +22,7 @@ type Config struct {
 	CORS      CORSConfig
 	Canvas    CanvasConfig
 	Health    HealthConfig
+	Auth      AuthConfig
 }
 
 // ServerConfig holds HTTP server configuration
@@ -112,6 +113,14 @@ type HealthConfig struct {
 	CheckInterval    time.Duration // Docker health check interval (minimum 10s)
 }
 
+// AuthConfig holds authentication configuration
+type AuthConfig struct {
+	Enabled       bool     // Enable/disable authentication
+	ReadWriteKeys []string // API keys with read-write permissions
+	ReadOnlyKeys  []string // API keys with read-only permissions
+	KeyHeader     string   // HTTP header name for API key
+}
+
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
 	// Load .env file if it exists (for development)
@@ -178,6 +187,12 @@ func Load() (*Config, error) {
 			S3ChecksDisabled: getEnvBool("S3_HEALTHCHECKS_DISABLE", false),
 			S3ChecksInterval: getS3HealthCheckInterval(),
 			CheckInterval:    getHealthCheckInterval(),
+		},
+		Auth: AuthConfig{
+			Enabled:       getEnvBool("AUTH_ENABLED", false),
+			ReadWriteKeys: getEnvStringSlice("AUTH_READWRITE_KEYS", []string{}),
+			ReadOnlyKeys:  getEnvStringSlice("AUTH_READONLY_KEYS", []string{}),
+			KeyHeader:     getEnv("AUTH_KEY_HEADER", "X-API-Key"),
 		},
 	}
 
