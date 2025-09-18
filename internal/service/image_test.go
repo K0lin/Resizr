@@ -470,7 +470,7 @@ func TestImageService_GetImageStream_Success(t *testing.T) {
 	service := NewImageService(mockRepo, mockStorage, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	ctx := context.Background()
-	stream, metadata, err := service.GetImageStream(ctx, testutil.ValidUUID, "thumbnail", "origin")
+	stream, metadata, err := service.GetImageStream(ctx, testutil.ValidUUID, "thumbnail", "original")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, stream)
