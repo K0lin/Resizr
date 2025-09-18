@@ -409,11 +409,8 @@ func (r *RedisRepository) DeleteCache(ctx context.Context, key string) error {
 // GetStats retrieves repository statistics
 /// safeInt64ToInt converts int64 to int safely, returning 0 if out of bounds.
 func safeInt64ToInt(v int64) int {
-	// On 32-bit platforms, int is 32 bits; on 64-bit, it's 64.
-	// Set bounds based on this.
-	const minInt = int64(int(^uint(0)>>1)) * -1 - 1 // matches int's min value
-	const maxInt = int64(int(^uint(0)>>1))
-	if v < minInt || v > maxInt {
+	// Use math.MinInt and math.MaxInt for portability/platform-safety
+	if v < math.MinInt || v > math.MaxInt {
 		return 0 // or set to -1 to signal "invalid"
 	}
 	return int(v)
