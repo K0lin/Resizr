@@ -104,22 +104,6 @@ func (p *ProcessorServiceImpl) GetDimensions(data []byte) (width, height int, er
 	}
 
 	return p.getImageDimensions(img)
-  
-	bounds := img.Bounds()
-	width = bounds.Dx()
-	height = bounds.Dy()
-
-	// Validate dimensions
-	if width <= 0 || height <= 0 {
-		return 0, 0, fmt.Errorf("invalid image dimensions: %dx%d", width, height)
-	}
-
-	if width > p.maxWidth || height > p.maxHeight {
-		return 0, 0, fmt.Errorf("image dimensions %dx%d exceed maximum allowed %dx%d",
-			width, height, p.maxWidth, p.maxHeight)
-	}
-
-	return width, height, nil
 }
 
 // ProcessImage resizes image to specified resolution
@@ -393,9 +377,9 @@ func (p *ProcessorServiceImpl) getImageDimensions(img image.Image) (width, heigh
 		return 0, 0, fmt.Errorf("invalid image dimensions: %dx%d", width, height)
 	}
 
-	if width > p.maxImageDimension || height > p.maxImageDimension {
+	if width > p.maxWidth || height > p.maxHeight {
 		return 0, 0, fmt.Errorf("image dimensions %dx%d exceed maximum allowed %dx%d",
-			width, height, p.maxImageDimension, p.maxImageDimension)
+			width, height, p.maxWidth, p.maxHeight)
 	}
 
 	return width, height, nil
