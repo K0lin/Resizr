@@ -606,3 +606,256 @@ func TestEdgeCases(t *testing.T) {
 		}
 	})
 }
+
+// Test alias functionality
+func TestResolutionAliases(t *testing.T) {
+	t.Run("ParseResolution with aliases", func(t *testing.T) {
+		testCases := []struct {
+			input          string
+			expectedWidth  int
+			expectedHeight int
+			expectedAlias  string
+			shouldError    bool
+		}{
+			{"800x600:small", 800, 600, "small", false},
+			{"1920x1080:large", 1920, 1080, "large", false},
+			{"100x100:tiny", 100, 100, "tiny", false},
+			{"800x600:my_custom_size", 800, 600, "my_custom_size", false},
+			{"800x600:", 800, 600, "", false},       // Empty alias should work
+			{"800x600", 800, 600, "", false},        // No alias should work
+			{":alias", 0, 0, "", true},              // No dimensions should fail
+			{"800x600:alias:extra", 0, 0, "", true}, // Multiple colons should fail
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.input, func(t *testing.T) {
+				config, err := ParseResolution(tc.input)
+
+				if tc.shouldError {
+					assert.Error(t, err)
+				} else {
+					assert.NoError(t, err)
+					assert.Equal(t, tc.expectedWidth, config.Width)
+					assert.Equal(t, tc.expectedHeight, config.Height)
+					assert.Equal(t, tc.expectedAlias, config.Alias)
+				}
+			})
+		}
+	})
+
+	t.Run("ResolutionConfig String with aliases", func(t *testing.T) {
+		testCases := []struct {
+			config   ResolutionConfig
+			expected string
+		}{
+			{ResolutionConfig{800, 600, "small"}, "800x600:small"},
+			{ResolutionConfig{1920, 1080, "large"}, "1920x1080:large"},
+			{ResolutionConfig{800, 600, ""}, "800x600"},
+			{ResolutionConfig{100, 100, "tiny"}, "100x100:tiny"},
+		}
+
+		for _, tc := range testCases {
+			result := tc.config.String()
+			assert.Equal(t, tc.expected, result)
+		}
+	})
+
+	t.Run("Alias utility functions", func(t *testing.T) {
+		testCases := []struct {
+			input              string
+			expectedDimensions string
+			expectedAlias      string
+		}{
+			{"800x600:small", "800x600", "small"},
+			{"1920x1080:large_screen", "1920x1080", "large_screen"},
+			{"100x100", "100x100", ""},
+			{"thumbnail", "thumbnail", ""},
+			{"800x600:", "800x600", ""},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.input, func(t *testing.T) {
+				dimensions := ExtractDimensions(tc.input)
+				alias := ExtractAlias(tc.input)
+
+				assert.Equal(t, tc.expectedDimensions, dimensions)
+				assert.Equal(t, tc.expectedAlias, alias)
+
+				// Test SplitResolutionAndAlias
+				splitDims, splitAlias := SplitResolutionAndAlias(tc.input)
+				assert.Equal(t, tc.expectedDimensions, splitDims)
+				assert.Equal(t, tc.expectedAlias, splitAlias)
+			})
+		}
+	})
+
+	t.Run("HasResolution with aliases", func(t *testing.T) {
+		metadata := &ImageMetadata{
+			Resolutions: []string{"thumbnail", "100x100:small", "800x600:medium", "1920x1080:large"},
+		}
+
+		// Test direct matches (legacy)
+		assert.True(t, metadata.HasResolution("thumbnail"))
+
+		// Test alias access
+		assert.True(t, metadata.HasResolution("small"))
+		assert.True(t, metadata.HasResolution("medium"))
+		assert.True(t, metadata.HasResolution("large"))
+
+		// Test dimensions access
+		assert.True(t, metadata.HasResolution("100x100"))
+		assert.True(t, metadata.HasResolution("800x600"))
+		assert.True(t, metadata.HasResolution("1920x1080"))
+
+		// Test invalid access (should be blocked)
+		assert.False(t, metadata.HasResolution("100x100:small"))  // Full string access blocked
+		assert.False(t, metadata.HasResolution("800x600:medium")) // Full string access blocked
+		assert.False(t, metadata.HasResolution("nonexistent"))    // Non-existent alias
+		assert.False(t, metadata.HasResolution("999x999"))        // Non-existent dimensions
+	})
+
+	t.Run("GetStorageKey with aliases", func(t *testing.T) {
+		metadata := &ImageMetadata{
+			ID:          "test-id",
+			Filename:    "test.jpg",
+			Resolutions: []string{"thumbnail", "100x100:small", "800x600:medium"},
+		}
+
+		// Test storage key generation (always uses dimensions to avoid duplicates)
+		testCases := []struct {
+			resolution string
+			expected   string
+		}{
+			{"thumbnail", "images/test-id/thumbnail.jpg"},
+			{"small", "images/test-id/100x100.jpg"},   // Alias resolves to dimensions
+			{"medium", "images/test-id/800x600.jpg"},  // Alias resolves to dimensions
+			{"100x100", "images/test-id/100x100.jpg"}, // Direct dimensions
+			{"800x600", "images/test-id/800x600.jpg"}, // Direct dimensions
+			{"original", "images/test-id/original.jpg"},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.resolution, func(t *testing.T) {
+				result := metadata.GetStorageKey(tc.resolution)
+				assert.Equal(t, tc.expected, result)
+			})
+		}
+	})
+
+	t.Run("FindStoredResolution", func(t *testing.T) {
+		metadata := &ImageMetadata{
+			Resolutions: []string{"thumbnail", "100x100:small", "800x600:medium"},
+		}
+
+		testCases := []struct {
+			input    string
+			expected string
+		}{
+			{"thumbnail", "thumbnail"},     // Direct match
+			{"small", "100x100"},           // Alias resolves to dimensions
+			{"medium", "800x600"},          // Alias resolves to dimensions
+			{"100x100", "100x100"},         // Direct dimensions
+			{"800x600", "800x600"},         // Direct dimensions
+			{"nonexistent", "nonexistent"}, // Fallback
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.input, func(t *testing.T) {
+				result := metadata.FindStoredResolution(tc.input)
+				assert.Equal(t, tc.expected, result)
+			})
+		}
+	})
+
+	t.Run("ResolveToDimensions", func(t *testing.T) {
+		metadata := &ImageMetadata{
+			Resolutions: []string{"thumbnail", "100x100:small", "800x600:medium"},
+		}
+
+		testCases := []struct {
+			input    string
+			expected string
+		}{
+			{"thumbnail", "thumbnail"},     // Predefined resolution
+			{"small", "100x100"},           // Alias resolves to dimensions
+			{"medium", "800x600"},          // Alias resolves to dimensions
+			{"100x100", "100x100"},         // Already dimensions
+			{"800x600", "800x600"},         // Already dimensions
+			{"nonexistent", "nonexistent"}, // Fallback
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.input, func(t *testing.T) {
+				result := metadata.ResolveToDimensions(tc.input)
+				assert.Equal(t, tc.expected, result)
+			})
+		}
+	})
+
+	t.Run("FormatResolutionWithAlias", func(t *testing.T) {
+		testCases := []struct {
+			width    int
+			height   int
+			alias    string
+			expected string
+		}{
+			{800, 600, "small", "800x600:small"},
+			{1920, 1080, "", "1920x1080"},
+			{100, 100, "tiny", "100x100:tiny"},
+		}
+
+		for _, tc := range testCases {
+			result := FormatResolutionWithAlias(tc.width, tc.height, tc.alias)
+			assert.Equal(t, tc.expected, result)
+		}
+	})
+
+	t.Run("IsValidDimensionFormat", func(t *testing.T) {
+		testCases := []struct {
+			input    string
+			expected bool
+		}{
+			{"800x600", true},
+			{"1920x1080", true},
+			{"1x1", true},
+			{"800x600:alias", false}, // With alias
+			{"thumbnail", false},     // Predefined
+			{"800", false},           // Missing height
+			{"x600", false},          // Missing width
+			{"abc", false},           // Invalid format
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.input, func(t *testing.T) {
+				result := IsValidDimensionFormat(tc.input)
+				assert.Equal(t, tc.expected, result)
+			})
+		}
+	})
+
+	t.Run("Backward compatibility", func(t *testing.T) {
+		// Simulate existing data (resolutions without aliases)
+		metadata := &ImageMetadata{
+			ID:          "test-id",
+			Filename:    "test.jpg",
+			Resolutions: []string{"thumbnail", "100x100", "800x600"},
+		}
+
+		// All existing functionality should still work
+		assert.True(t, metadata.HasResolution("thumbnail"))
+		assert.True(t, metadata.HasResolution("100x100"))
+		assert.True(t, metadata.HasResolution("800x600"))
+
+		// Storage keys should work as before
+		assert.Equal(t, "images/test-id/thumbnail.jpg", metadata.GetStorageKey("thumbnail"))
+		assert.Equal(t, "images/test-id/100x100.jpg", metadata.GetStorageKey("100x100"))
+		assert.Equal(t, "images/test-id/800x600.jpg", metadata.GetStorageKey("800x600"))
+
+		// Can add new alias resolutions
+		metadata.AddResolution("1920x1080:large")
+		assert.True(t, metadata.HasResolution("large"))
+		assert.True(t, metadata.HasResolution("1920x1080"))
+		// Storage key should always use dimensions (no duplicates)
+		assert.Equal(t, "images/test-id/1920x1080.jpg", metadata.GetStorageKey("large"))
+	})
+}

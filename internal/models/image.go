@@ -25,8 +25,9 @@ type ImageMetadata struct {
 
 // ResolutionConfig defines image resolution parameters
 type ResolutionConfig struct {
-	Width  int `json:"width"`
-	Height int `json:"height"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	Alias  string `json:"alias,omitempty"` // Optional alias for the resolution
 }
 
 // UploadRequest represents the request payload for image upload
@@ -148,10 +149,24 @@ func (im *ImageMetadata) GetDimensions() DimensionInfo {
 	}
 }
 
-// HasResolution checks if a specific resolution exists
+// HasResolution checks if a specific resolution exists (by dimensions or alias)
 func (im *ImageMetadata) HasResolution(resolution string) bool {
+	// Don't allow access via the full "dimensions:alias" format from API
+	if strings.Contains(resolution, ":") {
+		return false
+	}
+
 	for _, res := range im.Resolutions {
+		// Direct match for legacy resolutions (no colon)
 		if res == resolution {
+			return true
+		}
+		// Check if resolution matches an alias
+		if alias := ExtractAlias(res); alias != "" && alias == resolution {
+			return true
+		}
+		// Check if resolution matches dimensions part of an aliased resolution
+		if dimensions := ExtractDimensions(res); dimensions != res && dimensions == resolution {
 			return true
 		}
 	}
@@ -181,7 +196,40 @@ func (im *ImageMetadata) GetStorageKey(resolution string) string {
 	if resolution == "original" {
 		return fmt.Sprintf("images/%s/original.%s", im.ID, ext)
 	}
-	return fmt.Sprintf("images/%s/%s.%s", im.ID, resolution, ext)
+
+	// Always use dimensions for storage key to avoid duplicates
+	dimensions := im.ResolveToDimensions(resolution)
+	return fmt.Sprintf("images/%s/%s.%s", im.ID, dimensions, ext)
+}
+
+// ResolveToDimensions resolves any resolution (alias or dimensions) to pure dimensions for storage
+func (im *ImageMetadata) ResolveToDimensions(resolution string) string {
+	// If it's already in pure dimensions format, return as-is
+	if IsValidDimensionFormat(resolution) {
+		return resolution
+	}
+
+	// Check if it's a predefined resolution
+	if resolution == "thumbnail" {
+		return "thumbnail"
+	}
+
+	// Search for the resolution by alias and return its dimensions
+	for _, res := range im.Resolutions {
+		if alias := ExtractAlias(res); alias != "" && alias == resolution {
+			return ExtractDimensions(res)
+		}
+	}
+
+	// Fallback: return as-is (shouldn't happen if HasResolution was called first)
+	return resolution
+}
+
+// FindStoredResolution finds the actual stored resolution string for a given access resolution
+// Note: This is kept for backward compatibility but storage always uses dimensions
+func (im *ImageMetadata) FindStoredResolution(resolution string) string {
+	// For storage optimization, we always return the dimensions part
+	return im.ResolveToDimensions(resolution)
 }
 
 // ToInfoResponse converts ImageMetadata to InfoResponse
@@ -257,7 +305,7 @@ func (im *ImageMetadata) Validate() error {
 
 // Utility functions
 
-// ParseResolution parses a resolution string like "800x600" into ResolutionConfig
+// ParseResolution parses a resolution string like "800x600" or "800x600:alias" into ResolutionConfig
 func ParseResolution(resolution string) (ResolutionConfig, error) {
 	// Handle predefined resolutions
 	switch resolution {
@@ -267,12 +315,15 @@ func ParseResolution(resolution string) (ResolutionConfig, error) {
 		return ResolutionConfig{}, fmt.Errorf("original resolution cannot be parsed")
 	}
 
+	// Extract alias if present
+	dimensions, alias := SplitResolutionAndAlias(resolution)
+
 	// Parse custom resolution format: "WIDTHxHEIGHT"
 	resolutionRegex := regexp.MustCompile(`^(\d+)x(\d+)$`)
-	matches := resolutionRegex.FindStringSubmatch(resolution)
+	matches := resolutionRegex.FindStringSubmatch(dimensions)
 
 	if len(matches) != 3 {
-		return ResolutionConfig{}, fmt.Errorf("invalid resolution format: %s (expected format: WIDTHxHEIGHT)", resolution)
+		return ResolutionConfig{}, fmt.Errorf("invalid resolution format: %s (expected format: WIDTHxHEIGHT or WIDTHxHEIGHT:alias)", resolution)
 	}
 
 	width, err := strconv.Atoi(matches[1])
@@ -292,11 +343,14 @@ func ParseResolution(resolution string) (ResolutionConfig, error) {
 
 	// Note: Business logic validation (max dimensions) is handled at the service layer
 
-	return ResolutionConfig{Width: width, Height: height}, nil
+	return ResolutionConfig{Width: width, Height: height, Alias: alias}, nil
 }
 
-// FormatResolution formats a ResolutionConfig into a string
+// FormatResolution formats a ResolutionConfig into a string with optional alias
 func (rc ResolutionConfig) String() string {
+	if rc.Alias != "" {
+		return fmt.Sprintf("%dx%d:%s", rc.Width, rc.Height, rc.Alias)
+	}
 	return fmt.Sprintf("%dx%d", rc.Width, rc.Height)
 }
 
@@ -344,6 +398,43 @@ func GetExtensionFromMimeType(mimeType string) string {
 	default:
 		return ""
 	}
+}
+
+// Utility functions for resolution alias handling
+
+// SplitResolutionAndAlias splits a resolution string like "800x600:alias" into dimensions and alias
+func SplitResolutionAndAlias(resolution string) (dimensions, alias string) {
+	parts := strings.Split(resolution, ":")
+	if len(parts) == 2 {
+		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	}
+	return resolution, ""
+}
+
+// ExtractAlias extracts the alias from a resolution string like "800x600:alias"
+func ExtractAlias(resolution string) string {
+	_, alias := SplitResolutionAndAlias(resolution)
+	return alias
+}
+
+// ExtractDimensions extracts the dimensions part from a resolution string like "800x600:alias"
+func ExtractDimensions(resolution string) string {
+	dimensions, _ := SplitResolutionAndAlias(resolution)
+	return dimensions
+}
+
+// IsValidDimensionFormat checks if a string is in the WIDTHxHEIGHT format
+func IsValidDimensionFormat(resolution string) bool {
+	resolutionRegex := regexp.MustCompile(`^(\d+)x(\d+)$`)
+	return resolutionRegex.MatchString(resolution)
+}
+
+// FormatResolutionWithAlias creates a resolution string with alias if provided
+func FormatResolutionWithAlias(width, height int, alias string) string {
+	if alias != "" {
+		return fmt.Sprintf("%dx%d:%s", width, height, alias)
+	}
+	return fmt.Sprintf("%dx%d", width, height)
 }
 
 // NewImageMetadata creates a new ImageMetadata with current timestamp

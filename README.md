@@ -167,16 +167,27 @@ go run cmd/server/main.go
 # Health check
 curl http://localhost:8080/health
 
-# Upload an image
+# Upload an image with custom resolutions
 curl -X POST http://localhost:8080/api/v1/images \
   -F "image=@test.jpg" \
   -F "resolutions=800x600,1200x900"
+
+# Upload an image with aliased resolutions
+curl -X POST http://localhost:8080/api/v1/images \
+  -F "image=@test.jpg" \
+  -F "resolutions=800x600:small,1200x900:medium,1920x1080:large"
 
 # Get image info (replace {id} with actual image ID)
 curl http://localhost:8080/api/v1/images/{id}/info
 
 # Download thumbnail
 curl http://localhost:8080/api/v1/images/{id}/thumbnail -o thumbnail.jpg
+
+# Download by dimensions
+curl http://localhost:8080/api/v1/images/{id}/800x600 -o image_800x600.jpg
+
+# Download by alias
+curl http://localhost:8080/api/v1/images/{id}/small -o image_small.jpg
 ```
 
 ---
@@ -197,9 +208,57 @@ https://your-domain.com/api/v1
 | `GET` | `/images/{id}/original` | Download original image | 100/min |
 | `GET` | `/images/{id}/thumbnail` | Download thumbnail (150x150) | 100/min |
 
-| `GET` | `/images/{id}/{resolution}` | Download custom resolution | 100/min |
+| `GET` | `/images/{id}/{resolution}` | Download custom resolution or alias | 100/min |
 | `GET` | `/images/{id}/{resolution}/presigned-url` | Generate presigned URL for direct access | 50/min |
 | `GET` | `/health` | Health check | Unlimited |
+
+### 🏷️ Resolution Aliases
+
+RESIZR supports **resolution aliases** for easier API usage and better readability. You can assign custom names to resolutions during upload, then access images using either the dimensions or the alias.
+
+#### How It Works
+
+**During Upload:**
+```bash
+# Upload with aliased resolutions
+curl -X POST http://localhost:8080/api/v1/images \
+  -F "image=@photo.jpg" \
+  -F "resolutions=100x100:thumb,800x600:small,1920x1080:large"
+```
+
+**During Download - Both Methods Work:**
+```bash
+# Access by alias (user-friendly)
+curl http://localhost:8080/api/v1/images/{id}/thumb -o thumbnail.jpg
+curl http://localhost:8080/api/v1/images/{id}/small -o small.jpg
+
+# Access by dimensions (backward compatible)
+curl http://localhost:8080/api/v1/images/{id}/100x100 -o thumbnail.jpg
+curl http://localhost:8080/api/v1/images/{id}/800x600 -o small.jpg
+```
+
+#### Alias Format
+- **Upload Format**: `WIDTHxHEIGHT:alias` (e.g., `800x600:small`)
+- **Alias Rules**:
+  - Alphanumeric characters, underscores, and hyphens only
+  - 1-50 characters long
+  - Case-sensitive
+
+#### Benefits
+- **User-Friendly URLs**: `/images/{id}/small` instead of `/images/{id}/800x600`
+- **Storage Efficient**: No duplicate files - aliases map to same physical file
+- **Future-Proof**: Change dimensions without breaking client code
+- **Backward Compatible**: Existing dimension-based URLs continue to work
+- **Flexible**: Mix aliased and non-aliased resolutions in the same image
+
+#### Example Response
+```json
+{
+  "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "message": "Image uploaded successfully",
+  "resolutions": ["original", "thumbnail", "100x100:thumb", "800x600:small", "1920x1080:large"]
+}
+```
 
 ### 🔐 Authentication
 
@@ -502,8 +561,15 @@ s3://bucket/
     └── {uuid}/
         ├── original.jpg     # Original uploaded image
         ├── thumbnail.jpg    # 150x150 thumbnail
-        └── 800x600.jpg      # Custom resolution
+        ├── 800x600.jpg      # Custom resolution (accessible via dimensions OR alias)
+        └── 1920x1080.jpg    # Another resolution (no duplicates stored)
 ```
+
+**Storage Optimization:**
+- Files are stored **only once** using dimension-based names (e.g., `800x600.jpg`)
+- Aliases are metadata that resolve to the same physical file
+- No duplicate storage: `800x600:small` → points to `800x600.jpg`
+- Both `/images/{id}/small` and `/images/{id}/800x600` access the same file
 
 ---
 

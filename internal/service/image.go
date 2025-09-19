@@ -444,8 +444,10 @@ func (s *ImageServiceImpl) processResolution(ctx context.Context, imageID, resol
 		}
 	}
 
-	// Upload processed image
-	storageKey := fmt.Sprintf("images/%s/%s.%s", imageID, resolutionName, models.GetExtensionFromMimeType(mimeType))
+	// Upload processed image using dimensions-only storage key (no aliases)
+	// This ensures no duplicate files are stored
+	dimensions := models.ExtractDimensions(resolutionName)
+	storageKey := fmt.Sprintf("images/%s/%s.%s", imageID, dimensions, models.GetExtensionFromMimeType(mimeType))
 	if err := s.storage.Upload(ctx, storageKey, bytes.NewReader(processedData), int64(len(processedData)), mimeType); err != nil {
 		return models.StorageError{
 			Operation: "upload_processed",

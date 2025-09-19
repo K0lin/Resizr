@@ -202,11 +202,11 @@ func (h *ImageHandler) DownloadThumbnail(c *gin.Context) {
 func (h *ImageHandler) DownloadCustomResolution(c *gin.Context) {
 	resolution := c.Param("resolution")
 
-	// Validate resolution format (e.g., "800x600")
-	if !h.isValidCustomResolution(resolution) {
+	// Validate resolution format (e.g., "800x600", "800x600:alias", or just "alias")
+	if !h.isValidSize(resolution) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Invalid resolution format",
-			Message: "Resolution must be in format WIDTHxHEIGHT (e.g., 800x600)",
+			Message: "Resolution must be in format WIDTHxHEIGHT (e.g., 800x600), WIDTHxHEIGHT:alias (e.g., 800x600:small), or a valid alias",
 			Code:    http.StatusBadRequest,
 		})
 		return
@@ -296,10 +296,10 @@ func (h *ImageHandler) GeneratePresignedURL(c *gin.Context) {
 	}
 
 	// Validate size format for custom resolutions (after checking availability)
-	if size != "original" && size != "thumbnail" && !h.isValidCustomResolution(size) {
+	if size != "original" && size != "thumbnail" && !h.isValidSize(size) {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Invalid size format",
-			Message: "Custom resolution must be in format WIDTHxHEIGHT (e.g., 800x600)",
+			Message: "Custom resolution must be in format WIDTHxHEIGHT (e.g., 800x600), WIDTHxHEIGHT:alias (e.g., 800x600:small), or a valid alias",
 			Code:    http.StatusBadRequest,
 		})
 		return
@@ -501,8 +501,11 @@ func (h *ImageHandler) isValidUUID(id string) bool {
 }
 
 func (h *ImageHandler) isValidCustomResolution(resolution string) bool {
+	// Extract dimensions part (handles both "800x600" and "800x600:alias" formats)
+	dimensions := models.ExtractDimensions(resolution)
+
 	// Validate format: numbers + 'x' + numbers (e.g., "800x600")
-	parts := strings.Split(resolution, "x")
+	parts := strings.Split(dimensions, "x")
 	if len(parts) != 2 {
 		return false
 	}
@@ -523,6 +526,30 @@ func (h *ImageHandler) isValidSize(size string) bool {
 		return true
 	}
 
-	// Check custom resolution format
+	// Check if it's a valid alias (single word, no special characters except underscore/dash)
+	if h.isValidAlias(size) {
+		return true
+	}
+
+	// Check custom resolution format (dimensions or dimensions:alias)
 	return h.isValidCustomResolution(size)
+}
+
+func (h *ImageHandler) isValidAlias(alias string) bool {
+	// Valid alias: alphanumeric characters, underscore, dash, no spaces
+	// Must be between 1-50 characters
+	if len(alias) == 0 || len(alias) > 50 {
+		return false
+	}
+
+	for _, char := range alias {
+		if !((char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '_' || char == '-') {
+			return false
+		}
+	}
+
+	return true
 }

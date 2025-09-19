@@ -7,10 +7,25 @@ info:
     
     ## Features
     - Multi-resolution image processing with configurable resize algorithms (smart-fit, crop, stretch)
+    - Resolution aliases for user-friendly URLs and better maintainability
     - Support for JPEG, PNG, GIF, and WebP formats
     - Redis-based metadata storage and caching
     - S3-compatible storage backend
     - Rate limiting and security features
+
+    ## Resolution Aliases
+    RESIZR supports resolution aliases for easier API usage:
+
+    **Upload with aliases:**
+    ```bash
+    curl -F "resolutions=800x600:small,1920x1080:large" ...
+    ```
+
+    **Access by alias or dimensions:**
+    ```
+    GET /api/v1/images/{id}/small      # User-friendly alias
+    GET /api/v1/images/{id}/800x600    # Traditional dimensions (backward compatible)
+    ```
     
     ## Authentication
     RESIZR supports optional API key-based authentication with two permission levels:
@@ -171,14 +186,15 @@ paths:
                   type: array
                   items:
                     type: string
-                    pattern: '^[1-9]\d{0,3}x[1-9]\d{0,3}$'
-                    example: "800x600"
+                    pattern: '^[1-9]\d{0,3}x[1-9]\d{0,3}(:[a-zA-Z0-9_-]{1,50})?$'
+                    example: "800x600:small"
                   description: |
                     Optional array of custom resolutions to generate.
-                    Format: "WIDTHxHEIGHT" (e.g., ["800x600", "1200x900"])
+                    Format: "WIDTHxHEIGHT" or "WIDTHxHEIGHT:alias" (e.g., ["800x600", "1200x900:medium"])
+                    Aliases must be 1-50 characters, alphanumeric with underscores/hyphens only.
                     Supports multiple form fields or comma-separated values in a single field.
                     Maximum dimension (hard cap): 8,192 pixels. Default is 4,096 and configurable via IMAGE_MAX_WIDTH and IMAGE_MAX_HEIGHT up to the hard cap.
-                  example: ["800x600", "1200x900"]
+                  example: ["800x600:small", "1200x900:medium", "1920x1080:large"]
             encoding:
               image:
                 contentType: image/jpeg, image/png, image/gif, image/webp
@@ -209,7 +225,7 @@ paths:
               example:
                 id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
                 message: "Image uploaded successfully"
-                resolutions: ["original", "thumbnail", "800x600", "1200x900"]
+                resolutions: ["original", "thumbnail", "800x600:small", "1200x900:medium"]
         '400':
           $ref: '#/components/responses/BadRequest'
         '413':
@@ -277,7 +293,7 @@ paths:
                 dimensions:
                   width: 1920
                   height: 1080
-                available_resolutions: ["original", "thumbnail", "800x600", "1200x900"]
+                available_resolutions: ["original", "thumbnail", "800x600:small", "1200x900:medium"]
                 created_at: "2025-09-11T10:30:00Z"
         '404':
           $ref: '#/components/responses/NotFound'
@@ -522,12 +538,12 @@ paths:
           in: path
           required: true
           description: |
-            Custom resolution in WIDTHxHEIGHT format (e.g., "800x600").
+            Custom resolution in WIDTHxHEIGHT format (e.g., "800x600") or alias (e.g., "small").
             Must be a resolution that was requested during upload.
           schema:
             type: string
-            pattern: '^[1-9]\d{0,3}x[1-9]\d{0,3}$'
-            example: "800x600"
+            pattern: '^([1-9]\d{0,3}x[1-9]\d{0,3}|[a-zA-Z0-9_-]{1,50})$'
+            example: "small"
         - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
@@ -696,11 +712,11 @@ components:
       name: resolution
       in: path
       required: true
-      description: Image resolution/size
+      description: Image resolution/size (dimensions, alias, or predefined)
       schema:
         type: string
-        pattern: '^(original|thumbnail|[1-9]\d{0,3}x[1-9]\d{0,3})$'
-      example: "thumbnail"
+        pattern: '^(original|thumbnail|[1-9]\d{0,3}x[1-9]\d{0,3}|[a-zA-Z0-9_-]{1,50})$'
+      example: "small"
 
   schemas:
     UploadResponse:
@@ -723,8 +739,8 @@ components:
           type: array
           items:
             type: string
-          description: List of available resolutions for this image
-          example: ["original", "thumbnail", "800x600", "1200x900"]
+          description: List of available resolutions for this image (may include aliases)
+          example: ["original", "thumbnail", "800x600:small", "1200x900:medium"]
 
     InfoResponse:
       type: object
@@ -762,8 +778,8 @@ components:
           type: array
           items:
             type: string
-          description: List of available resolutions for this image
-          example: ["original", "thumbnail", "800x600", "1200x900"]
+          description: List of available resolutions for this image (may include aliases)
+          example: ["original", "thumbnail", "800x600:small", "1200x900:medium"]
         created_at:
           type: string
           format: date-time
@@ -919,7 +935,7 @@ components:
               summary: Invalid resolution format
               value:
                 error: "Validation failed"
-                message: "Invalid resolution format. Use WIDTHxHEIGHT (e.g., 800x600)"
+                message: "Invalid resolution format. Use WIDTHxHEIGHT (e.g., 800x600), WIDTHxHEIGHT:alias (e.g., 800x600:small), or a valid alias"
                 code: 400
             InvalidUUID:
               summary: Invalid UUID

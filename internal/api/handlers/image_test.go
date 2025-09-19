@@ -371,7 +371,7 @@ func TestImageHandler_DownloadCustomResolution(t *testing.T) {
 		},
 		{
 			name:           "invalid resolution format",
-			resolution:     "invalid",
+			resolution:     "inv@lid", // Use invalid characters to actually fail validation
 			setupMock:      func(mock *mockImageService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectError:    true,
@@ -557,7 +557,8 @@ func TestImageHandler_ValidationHelpers(t *testing.T) {
 	assert.True(t, handler.isValidSize("thumbnail"))
 
 	assert.True(t, handler.isValidSize("800x600"))
-	assert.False(t, handler.isValidSize("invalid"))
+	assert.True(t, handler.isValidSize("valid_alias")) // Valid alias
+	assert.False(t, handler.isValidSize("inv@lid"))    // Invalid characters
 }
 
 func TestImageHandler_FilenameGeneration(t *testing.T) {
