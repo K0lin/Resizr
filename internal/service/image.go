@@ -187,10 +187,11 @@ func (s *ImageServiceImpl) GetMetadata(ctx context.Context, imageID string) (*mo
 }
 
 // GetImageStream retrieves image data as a stream
-func (s *ImageServiceImpl) GetImageStream(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error) {
+func (s *ImageServiceImpl) GetImageStream(ctx context.Context, imageID, resolution, format string) (io.ReadCloser, *models.ImageMetadata, error) {
 	logger.DebugWithContext(ctx, "Retrieving image stream",
 		zap.String("image_id", imageID),
-		zap.String("resolution", resolution))
+		zap.String("resolution", resolution),
+		zap.String("format", format))
 
 	// Get metadata first
 	metadata, err := s.GetMetadata(ctx, imageID)
@@ -217,6 +218,14 @@ func (s *ImageServiceImpl) GetImageStream(ctx context.Context, imageID, resoluti
 		}
 	}
 
+	// Convert image(if required)
+	if format != "original" && metadata.MimeType != s.convertToMimeType(format) {
+		stream, err = s.processConvertion(ctx, stream, format)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
 	return stream, metadata, nil
 }
 
@@ -238,7 +247,7 @@ func (s *ImageServiceImpl) ProcessResolution(ctx context.Context, imageID, resol
 	}
 
 	// Download original image data
-	originalStream, _, err := s.GetImageStream(ctx, imageID, "original")
+	originalStream, _, err := s.GetImageStream(ctx, imageID, "original", "original")
 	if err != nil {
 		return err
 	}
@@ -487,5 +496,46 @@ func (s *ImageServiceImpl) cleanupUploadedImages(ctx context.Context, imageID st
 				zap.String("storage_key", storageKey),
 				zap.Error(err))
 		}
+	}
+}
+
+func (s *ImageServiceImpl) processConvertion(ctx context.Context, stream io.ReadCloser, format string) (io.ReadCloser, error) {
+	convertConfig := ConvertConfig{
+		Quality: s.config.Image.Quality,
+		Format:  format,
+	}
+
+	originalData, err := io.ReadAll(stream)
+	if err != nil {
+		return nil, models.ProcessingError{
+			Operation: "read_original",
+			Reason:    err.Error(),
+		}
+	}
+
+	// Process image
+	processedData, err := s.processor.ConvertImage(originalData, convertConfig)
+	if err != nil {
+		return nil, models.ProcessingError{
+			Operation: "convert",
+			Reason:    err.Error(),
+		}
+	}
+
+	return io.NopCloser(bytes.NewReader(processedData)), nil
+}
+
+func (s *ImageServiceImpl) convertToMimeType(format string) string {
+	switch format {
+	case "jpeg":
+		return "image/jpeg"
+	case "png":
+		return "image/png"
+	case "gif":
+		return "image/gif"
+	case "webp":
+		return "image/webp"
+	default:
+		return "application/bytes"
 	}
 }

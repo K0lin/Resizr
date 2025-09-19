@@ -200,6 +200,7 @@ type mockProcessorServiceForImageService struct {
 	validateImageFunc func(data []byte, maxSize int64) error
 	detectFormatFunc  func(data []byte) (string, error)
 	getDimensionsFunc func(data []byte) (width, height int, err error)
+	convertImageFunc  func(data []byte, config ConvertConfig) ([]byte, error)
 }
 
 func (m *mockProcessorServiceForImageService) ProcessImage(data []byte, config ResizeConfig) ([]byte, error) {
@@ -228,6 +229,13 @@ func (m *mockProcessorServiceForImageService) GetDimensions(data []byte) (width,
 		return m.getDimensionsFunc(data)
 	}
 	return 1920, 1080, nil
+}
+
+func (m *mockProcessorServiceForImageService) ConvertImage(data []byte, config ConvertConfig) ([]byte, error) {
+	if m.convertImageFunc != nil {
+		return m.convertImageFunc(data, config)
+	}
+	return nil, nil
 }
 
 func TestNewImageService(t *testing.T) {
@@ -462,7 +470,7 @@ func TestImageService_GetImageStream_Success(t *testing.T) {
 	service := NewImageService(mockRepo, mockStorage, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	ctx := context.Background()
-	stream, metadata, err := service.GetImageStream(ctx, testutil.ValidUUID, "thumbnail")
+	stream, metadata, err := service.GetImageStream(ctx, testutil.ValidUUID, "thumbnail", "original")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, stream)
@@ -488,7 +496,7 @@ func TestImageService_GetImageStream_ResolutionNotFound(t *testing.T) {
 	service := NewImageService(mockRepo, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	ctx := context.Background()
-	_, _, err := service.GetImageStream(ctx, testutil.ValidUUID, "nonexistent")
+	_, _, err := service.GetImageStream(ctx, testutil.ValidUUID, "nonexistent", "original")
 
 	assert.Error(t, err)
 	assert.IsType(t, models.NotFoundError{}, err)

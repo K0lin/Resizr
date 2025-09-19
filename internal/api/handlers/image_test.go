@@ -22,7 +22,7 @@ import (
 type mockImageService struct {
 	processUploadFunc        func(ctx context.Context, input service.UploadInput) (*service.UploadResult, error)
 	getMetadataFunc          func(ctx context.Context, imageID string) (*models.ImageMetadata, error)
-	getImageStreamFunc       func(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error)
+	getImageStreamFunc       func(ctx context.Context, imageID, resolution, format string) (io.ReadCloser, *models.ImageMetadata, error)
 	processResolutionFunc    func(ctx context.Context, imageID, resolution string) error
 	generatePresignedURLFunc func(ctx context.Context, storageKey string, expiration time.Duration) (string, error)
 	deleteImageFunc          func(ctx context.Context, imageID string) error
@@ -43,9 +43,9 @@ func (m *mockImageService) GetMetadata(ctx context.Context, imageID string) (*mo
 	return nil, nil
 }
 
-func (m *mockImageService) GetImageStream(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error) {
+func (m *mockImageService) GetImageStream(ctx context.Context, imageID, resolution, format string) (io.ReadCloser, *models.ImageMetadata, error) {
 	if m.getImageStreamFunc != nil {
-		return m.getImageStreamFunc(ctx, imageID, resolution)
+		return m.getImageStreamFunc(ctx, imageID, resolution, format)
 	}
 	return nil, nil, nil
 }
@@ -327,7 +327,7 @@ func TestImageHandler_DownloadMethods(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockService := &mockImageService{
-				getImageStreamFunc: func(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error) {
+				getImageStreamFunc: func(ctx context.Context, imageID, resolution, _ string) (io.ReadCloser, *models.ImageMetadata, error) {
 					assert.Equal(t, testutil.ValidUUID, imageID)
 					assert.Equal(t, tt.resolution, resolution)
 					return testutil.NewMockReadCloser(testImageData), mockMetadata, nil
@@ -362,7 +362,7 @@ func TestImageHandler_DownloadCustomResolution(t *testing.T) {
 			name:       "valid custom resolution",
 			resolution: "800x600",
 			setupMock: func(mock *mockImageService) {
-				mock.getImageStreamFunc = func(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error) {
+				mock.getImageStreamFunc = func(ctx context.Context, imageID, resolution, _ string) (io.ReadCloser, *models.ImageMetadata, error) {
 					return testutil.NewMockReadCloser(testutil.CreateTestImageData()), testutil.CreateTestImageMetadata(), nil
 				}
 			},
@@ -380,7 +380,7 @@ func TestImageHandler_DownloadCustomResolution(t *testing.T) {
 			name:       "service error",
 			resolution: "800x600",
 			setupMock: func(mock *mockImageService) {
-				mock.getImageStreamFunc = func(ctx context.Context, imageID, resolution string) (io.ReadCloser, *models.ImageMetadata, error) {
+				mock.getImageStreamFunc = func(ctx context.Context, imageID, resolution, _ string) (io.ReadCloser, *models.ImageMetadata, error) {
 					return nil, nil, models.NotFoundError{Resource: "image", ID: imageID}
 				}
 			},
