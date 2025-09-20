@@ -394,6 +394,77 @@ func TestGetExtensionFromMimeType(t *testing.T) {
 	}
 }
 
+func TestNewImageMetadataWithHash(t *testing.T) {
+	id := "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+	filename := "test.jpg"
+	mimeType := "image/jpeg"
+	size := int64(102400)
+	width := 1920
+	height := 1080
+	hash := ImageHash{
+		Algorithm: "SHA256",
+		Value:     "abcdef123456",
+		Size:      size,
+	}
+
+	metadata := NewImageMetadataWithHash(id, filename, mimeType, size, width, height, hash)
+
+	assert.Equal(t, id, metadata.ID)
+	assert.Equal(t, filename, metadata.Filename)
+	assert.Equal(t, mimeType, metadata.MimeType)
+	assert.Equal(t, size, metadata.Size)
+	assert.Equal(t, width, metadata.Width)
+	assert.Equal(t, height, metadata.Height)
+	assert.Equal(t, hash, metadata.Hash)
+	assert.Equal(t, "images/f47ac10b-58cc-4372-a567-0e02b2c3d479/original.jpg", metadata.OriginalKey)
+	assert.Empty(t, metadata.Resolutions)
+	assert.True(t, time.Since(metadata.CreatedAt) < time.Second)
+	assert.True(t, time.Since(metadata.UpdatedAt) < time.Second)
+}
+
+func TestImageMetadata_GetActualStorageKey(t *testing.T) {
+	t.Run("non_deduped_image", func(t *testing.T) {
+		metadata := &ImageMetadata{
+			ID:        "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+			IsDeduped: false,
+			Filename:  "test.jpg",
+			MimeType:  "image/jpeg",
+		}
+
+		key := metadata.GetActualStorageKey("800x600")
+		expected := "images/f47ac10b-58cc-4372-a567-0e02b2c3d479/800x600.jpg"
+		assert.Equal(t, expected, key)
+	})
+
+	t.Run("deduped_image", func(t *testing.T) {
+		metadata := &ImageMetadata{
+			ID:            "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+			IsDeduped:     true,
+			SharedImageID: "550e8400-e29b-41d4-a716-446655440000",
+			Filename:      "test.jpg",
+			MimeType:      "image/jpeg",
+		}
+
+		key := metadata.GetActualStorageKey("800x600")
+		expected := "images/550e8400-e29b-41d4-a716-446655440000/800x600.jpg"
+		assert.Equal(t, expected, key)
+	})
+}
+
+func TestImageMetadata_MarkAsDeduped(t *testing.T) {
+	metadata := &ImageMetadata{
+		ID:        "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+		IsDeduped: false,
+	}
+
+	sharedImageID := "550e8400-e29b-41d4-a716-446655440000"
+	metadata.MarkAsDeduped(sharedImageID)
+
+	assert.True(t, metadata.IsDeduped)
+	assert.Equal(t, sharedImageID, metadata.SharedImageID)
+	assert.True(t, time.Since(metadata.UpdatedAt) < time.Second)
+}
+
 func TestCustomErrorTypes(t *testing.T) {
 	t.Run("ValidationError", func(t *testing.T) {
 		err := ValidationError{

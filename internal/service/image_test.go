@@ -830,3 +830,96 @@ func TestUploadResult_Structure(t *testing.T) {
 	assert.Equal(t, int64(102400), result.OriginalSize)
 	assert.Equal(t, int64(5000), result.ProcessedSizes["thumbnail"])
 }
+
+func TestImageService_DeleteResolution(t *testing.T) {
+	t.Run("successful_deletion", func(t *testing.T) {
+		mockRepo := &testutil.MockImageRepository{
+			GetFunc: func(ctx context.Context, id string) (*models.ImageMetadata, error) {
+				return &models.ImageMetadata{
+					ID:          id,
+					MimeType:    "image/jpeg",
+					Resolutions: []string{"original", "800x600", "thumbnail"},
+				}, nil
+			},
+			UpdateFunc: func(ctx context.Context, metadata *models.ImageMetadata) error {
+				return nil
+			},
+		}
+
+		mockDeduplicationRepo := &testutil.MockDeduplicationRepository{}
+		mockStorage := &testutil.MockStorageProvider{
+			DeleteFunc: func(ctx context.Context, key string) error {
+				return nil
+			},
+		}
+		mockProcessor := &testProcessorService{}
+
+		service := NewImageService(mockRepo, mockDeduplicationRepo, mockStorage, mockProcessor, testConfig())
+
+		err := service.DeleteResolution(context.Background(), testutil.ValidUUID, "800x600")
+		assert.NoError(t, err)
+	})
+
+	t.Run("image_not_found", func(t *testing.T) {
+		mockRepo := &testutil.MockImageRepository{
+			GetFunc: func(ctx context.Context, id string) (*models.ImageMetadata, error) {
+				return nil, models.NotFoundError{Resource: "image", ID: id}
+			},
+		}
+
+		mockDeduplicationRepo := &testutil.MockDeduplicationRepository{}
+		mockStorage := &testutil.MockStorageProvider{}
+		mockProcessor := &testProcessorService{}
+
+		service := NewImageService(mockRepo, mockDeduplicationRepo, mockStorage, mockProcessor, testConfig())
+
+		err := service.DeleteResolution(context.Background(), testutil.ValidUUID, "800x600")
+		assert.Error(t, err)
+		var notFoundErr models.NotFoundError
+		assert.ErrorAs(t, err, &notFoundErr)
+	})
+
+	t.Run("resolution_not_found", func(t *testing.T) {
+		mockRepo := &testutil.MockImageRepository{
+			GetFunc: func(ctx context.Context, id string) (*models.ImageMetadata, error) {
+				return &models.ImageMetadata{
+					ID:          id,
+					Resolutions: []string{"original", "thumbnail"},
+				}, nil
+			},
+		}
+
+		mockDeduplicationRepo := &testutil.MockDeduplicationRepository{}
+		mockStorage := &testutil.MockStorageProvider{}
+		mockProcessor := &testProcessorService{}
+
+		service := NewImageService(mockRepo, mockDeduplicationRepo, mockStorage, mockProcessor, testConfig())
+
+		err := service.DeleteResolution(context.Background(), testutil.ValidUUID, "800x600")
+		assert.Error(t, err)
+		var notFoundErr models.NotFoundError
+		assert.ErrorAs(t, err, &notFoundErr)
+	})
+
+	t.Run("cannot_delete_original", func(t *testing.T) {
+		mockRepo := &testutil.MockImageRepository{
+			GetFunc: func(ctx context.Context, id string) (*models.ImageMetadata, error) {
+				return &models.ImageMetadata{
+					ID:          id,
+					Resolutions: []string{"original", "800x600"},
+				}, nil
+			},
+		}
+
+		mockDeduplicationRepo := &testutil.MockDeduplicationRepository{}
+		mockStorage := &testutil.MockStorageProvider{}
+		mockProcessor := &testProcessorService{}
+
+		service := NewImageService(mockRepo, mockDeduplicationRepo, mockStorage, mockProcessor, testConfig())
+
+		err := service.DeleteResolution(context.Background(), testutil.ValidUUID, "original")
+		assert.Error(t, err)
+		var validationErr models.ValidationError
+		assert.ErrorAs(t, err, &validationErr)
+	})
+}

@@ -654,3 +654,195 @@ func TestNewImageHandler(t *testing.T) {
 	assert.Equal(t, mockService, handler.imageService)
 	assert.Equal(t, cfg, handler.config)
 }
+
+func TestImageHandler_Delete(t *testing.T) {
+	t.Run("successful_deletion", func(t *testing.T) {
+		mockService := &mockImageService{
+			deleteImageFunc: func(ctx context.Context, imageID string) error {
+				assert.Equal(t, testutil.ValidUUID, imageID)
+				return nil
+			},
+		}
+
+		handler := &ImageHandler{imageService: mockService}
+
+		req := testutil.CreateTestRequest("DELETE", "/images/"+testutil.ValidUUID, nil)
+		c, w := testutil.SetupTestContext(req)
+		c.Params = gin.Params{{Key: "id", Value: testutil.ValidUUID}}
+
+		handler.Delete(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		err := testutil.ParseJSONResponse(w, &response)
+		assert.NoError(t, err)
+		assert.Equal(t, "Image deleted successfully", response["message"])
+		assert.Equal(t, testutil.ValidUUID, response["image_id"])
+	})
+
+	t.Run("invalid_uuid", func(t *testing.T) {
+		mockService := &mockImageService{}
+		handler := &ImageHandler{imageService: mockService}
+
+		req := testutil.CreateTestRequest("DELETE", "/images/invalid-uuid", nil)
+		c, w := testutil.SetupTestContext(req)
+		c.Params = gin.Params{{Key: "id", Value: "invalid-uuid"}}
+
+		handler.Delete(c)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+
+		var response map[string]interface{}
+		err := testutil.ParseJSONResponse(w, &response)
+		assert.NoError(t, err)
+		assert.Contains(t, response, "error")
+	})
+
+	t.Run("image_not_found", func(t *testing.T) {
+		mockService := &mockImageService{
+			deleteImageFunc: func(ctx context.Context, imageID string) error {
+				return models.NotFoundError{Resource: "image", ID: imageID}
+			},
+		}
+
+		handler := &ImageHandler{imageService: mockService}
+
+		req := testutil.CreateTestRequest("DELETE", "/images/"+testutil.ValidUUID, nil)
+		c, w := testutil.SetupTestContext(req)
+		c.Params = gin.Params{{Key: "id", Value: testutil.ValidUUID}}
+
+		handler.Delete(c)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("service_error", func(t *testing.T) {
+		mockService := &mockImageService{
+			deleteImageFunc: func(ctx context.Context, imageID string) error {
+				return errors.New("service error")
+			},
+		}
+
+		handler := &ImageHandler{imageService: mockService}
+
+		req := testutil.CreateTestRequest("DELETE", "/images/"+testutil.ValidUUID, nil)
+		c, w := testutil.SetupTestContext(req)
+		c.Params = gin.Params{{Key: "id", Value: testutil.ValidUUID}}
+
+		handler.Delete(c)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestImageHandler_DeleteResolution(t *testing.T) {
+	t.Run("successful_deletion", func(t *testing.T) {
+		mockService := &mockImageService{
+			deleteResolutionFunc: func(ctx context.Context, imageID, resolution string) error {
+				assert.Equal(t, testutil.ValidUUID, imageID)
+				assert.Equal(t, "800x600", resolution)
+				return nil
+			},
+		}
+
+		handler := &ImageHandler{imageService: mockService}
+
+		req := testutil.CreateTestRequest("DELETE", "/images/"+testutil.ValidUUID+"/800x600", nil)
+		c, w := testutil.SetupTestContext(req)
+		c.Params = gin.Params{
+			{Key: "id", Value: testutil.ValidUUID},
+			{Key: "resolution", Value: "800x600"},
+		}
+
+		handler.DeleteResolution(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		err := testutil.ParseJSONResponse(w, &response)
+		assert.NoError(t, err)
+		assert.Equal(t, "Resolution deleted successfully", response["message"])
+		assert.Equal(t, testutil.ValidUUID, response["image_id"])
+		assert.Equal(t, "800x600", response["resolution"])
+	})
+
+	t.Run("invalid_uuid", func(t *testing.T) {
+		mockService := &mockImageService{}
+		handler := &ImageHandler{imageService: mockService}
+
+		req := testutil.CreateTestRequest("DELETE", "/images/invalid-uuid/800x600", nil)
+		c, w := testutil.SetupTestContext(req)
+		c.Params = gin.Params{
+			{Key: "id", Value: "invalid-uuid"},
+			{Key: "resolution", Value: "800x600"},
+		}
+
+		handler.DeleteResolution(c)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("image_not_found", func(t *testing.T) {
+		mockService := &mockImageService{
+			deleteResolutionFunc: func(ctx context.Context, imageID, resolution string) error {
+				return models.NotFoundError{Resource: "image", ID: imageID}
+			},
+		}
+
+		handler := &ImageHandler{imageService: mockService}
+
+		req := testutil.CreateTestRequest("DELETE", "/images/"+testutil.ValidUUID+"/800x600", nil)
+		c, w := testutil.SetupTestContext(req)
+		c.Params = gin.Params{
+			{Key: "id", Value: testutil.ValidUUID},
+			{Key: "resolution", Value: "800x600"},
+		}
+
+		handler.DeleteResolution(c)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("resolution_not_found", func(t *testing.T) {
+		mockService := &mockImageService{
+			deleteResolutionFunc: func(ctx context.Context, imageID, resolution string) error {
+				return models.NotFoundError{Resource: "resolution", ID: resolution}
+			},
+		}
+
+		handler := &ImageHandler{imageService: mockService}
+
+		req := testutil.CreateTestRequest("DELETE", "/images/"+testutil.ValidUUID+"/nonexistent", nil)
+		c, w := testutil.SetupTestContext(req)
+		c.Params = gin.Params{
+			{Key: "id", Value: testutil.ValidUUID},
+			{Key: "resolution", Value: "nonexistent"},
+		}
+
+		handler.DeleteResolution(c)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("service_error", func(t *testing.T) {
+		mockService := &mockImageService{
+			deleteResolutionFunc: func(ctx context.Context, imageID, resolution string) error {
+				return errors.New("service error")
+			},
+		}
+
+		handler := &ImageHandler{imageService: mockService}
+
+		req := testutil.CreateTestRequest("DELETE", "/images/"+testutil.ValidUUID+"/800x600", nil)
+		c, w := testutil.SetupTestContext(req)
+		c.Params = gin.Params{
+			{Key: "id", Value: testutil.ValidUUID},
+			{Key: "resolution", Value: "800x600"},
+		}
+
+		handler.DeleteResolution(c)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
