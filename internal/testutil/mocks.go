@@ -7,9 +7,18 @@ import (
 
 	"resizr/internal/models"
 	"resizr/internal/repository"
-	"resizr/internal/service"
 	"resizr/internal/storage"
 )
+
+// ResizeConfig represents image resizing configuration (local copy to avoid import cycle)
+type ResizeConfig struct {
+	Width           int    `json:"width"`
+	Height          int    `json:"height"`
+	Quality         int    `json:"quality"`
+	Format          string `json:"format"`
+	Mode            string `json:"mode"`
+	BackgroundColor string `json:"background_color"`
+}
 
 // ServiceUploadInput represents input for image upload (matches service.UploadInput)
 type ServiceUploadInput struct {
@@ -327,15 +336,15 @@ func (m *MockStorageProvider) GetURL(key string) string {
 
 // MockProcessorService is a mock implementation of ProcessorService
 type MockProcessorService struct {
-	ProcessImageFunc  func(data []byte, config service.ResizeConfig) ([]byte, error)
+	ProcessImageFunc  func(data []byte, config ResizeConfig) ([]byte, error)
 	ValidateImageFunc func(data []byte, maxSize int64) error
 	DetectFormatFunc  func(data []byte) (string, error)
 	GetDimensionsFunc func(data []byte) (width, height int, err error)
 }
 
-func (m *MockProcessorService) ProcessImage(data []byte, config service.ResizeConfig) ([]byte, error) {
+func (m *MockProcessorService) ProcessImage(data []byte, config interface{}) ([]byte, error) {
 	if m.ProcessImageFunc != nil {
-		return m.ProcessImageFunc(data, config)
+		return m.ProcessImageFunc(data, config.(ResizeConfig))
 	}
 	return nil, nil
 }
