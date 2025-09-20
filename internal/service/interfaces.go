@@ -25,6 +25,9 @@ type ImageService interface {
 	// DeleteImage removes an image and all its resolutions
 	DeleteImage(ctx context.Context, imageID string) error
 
+	// DeleteResolution removes a specific resolution from an image (except original)
+	DeleteResolution(ctx context.Context, imageID, resolution string) error
+
 	// ListImages retrieves paginated list of images
 	ListImages(ctx context.Context, offset, limit int) ([]*models.ImageMetadata, int, error)
 

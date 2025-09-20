@@ -3,15 +3,30 @@ openapi: 3.0.3
 info:
   title: RESIZR - Image Processing API
   description: |
-    **RESIZR** is a high-performance image processing service that provides RESTful APIs for image upload, processing, and delivery. 
-    
+    **RESIZR** is a high-performance image processing service that provides RESTful APIs for image upload, processing, and delivery.
+
     ## Features
+    - **Smart Deduplication**: Automatic detection and sharing of identical image content with reference tracking
     - Multi-resolution image processing with configurable resize algorithms (smart-fit, crop, stretch)
     - Resolution aliases for user-friendly URLs and better maintainability
     - Support for JPEG, PNG, GIF, and WebP formats
     - Redis-based metadata storage and caching
     - S3-compatible storage backend
     - Rate limiting and security features
+
+    ## Deduplication System
+    RESIZR includes advanced deduplication that automatically shares identical image resolutions across users:
+
+    **How it works:**
+    - SHA-256 hash calculation for content identification
+    - Byte-to-byte verification to prevent hash collisions
+    - Reference counting for proper cleanup
+    - Storage optimization with shared resolutions
+
+    **Benefits:**
+    - Reduced storage costs through content sharing
+    - Faster uploads for duplicate content
+    - User isolation with independent access permissions
 
     ## Resolution Aliases
     RESIZR supports resolution aliases for easier API usage:
@@ -152,19 +167,27 @@ paths:
       summary: Upload image
       description: |
         Upload a new image file with optional custom resolution processing.
-        
+
         The service will:
         1. Validate the uploaded file (format, size, etc.)
         2. Generate a unique UUID for the image
-        3. Process default resolutions (thumbnail) if enabled via GENERATE_DEFAULT_RESOLUTIONS
-        4. Process any requested custom resolutions
-        5. Store all versions in S3-compatible storage
-        6. Save metadata to Redis
-        
+        3. **Check for deduplication** - automatically detect if identical content already exists
+        4. Process default resolutions (thumbnail) if enabled via GENERATE_DEFAULT_RESOLUTIONS
+        5. Process any requested custom resolutions
+        6. **Share storage** for duplicate content or store new files
+        7. Save metadata to Redis with deduplication information
+
+        **Deduplication Process:**
+        - Calculates SHA-256 hash of image content
+        - Compares with existing images for identical content
+        - Performs byte-to-byte verification to prevent hash collisions
+        - Shares existing resolutions when duplicates are found
+        - Tracks reference counts for proper cleanup
+
         **Supported formats:** JPEG, PNG, GIF, WebP
         **Maximum file size:** 10MB (configurable)
-        **Processing time:** Typically 200-500ms depending on image size
-        
+        **Processing time:** Typically 200-500ms depending on image size and deduplication status
+
       operationId: uploadImage
       security:
         - ApiKeyAuth: []
@@ -226,6 +249,12 @@ paths:
                 id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
                 message: "Image uploaded successfully"
                 resolutions: ["original", "thumbnail", "800x600:small", "1200x900:medium"]
+                deduplication_info:
+                  is_deduplicated: true
+                  shared_image_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                  shared_resolutions: ["800x600", "1200x900"]
+                  reference_count: 3
+                processing_time_ms: 450
         '400':
           $ref: '#/components/responses/BadRequest'
         '413':
@@ -576,6 +605,140 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags:
+        - Images
+      summary: Delete specific resolution
+      description: |
+        Delete a specific resolution of an uploaded image.
+
+        **Deduplication Behavior:**
+        - Only removes the user's reference to this specific resolution
+        - Physical file is only deleted when the last user reference is removed
+        - Other resolutions of the same image remain intact
+        - Shared resolutions used by other users remain intact
+
+        **Supported Resolutions:**
+        - "original": Delete original uploaded image
+        - "thumbnail": Delete thumbnail (150x150)
+        - "WIDTHxHEIGHT": Delete custom resolution (e.g., "800x600")
+        - "alias": Delete aliased resolution (e.g., "small")
+
+        **Note:** This operation cannot be undone. Use with caution.
+
+      operationId: deleteResolution
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+        - name: resolution
+          in: path
+          required: true
+          description: |
+            Resolution to delete. Can be:
+            - "original": Original uploaded image
+            - "thumbnail": Thumbnail (150x150)
+            - "WIDTHxHEIGHT": Custom resolution (e.g., "800x600")
+            - "alias": Aliased resolution (e.g., "small")
+          schema:
+            type: string
+            pattern: '^(original|thumbnail|[1-9]\d{0,3}x[1-9]\d{0,3}|[a-zA-Z0-9_-]{1,50})$'
+            example: "800x600"
+      responses:
+        '200':
+          description: Resolution deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - message
+                properties:
+                  message:
+                    type: string
+                    description: Success message
+                    example: "Resolution deleted successfully"
+                  deleted:
+                    type: boolean
+                    description: Whether the physical file was deleted (false if shared)
+                    example: false
+                  remaining_references:
+                    type: integer
+                    description: Number of remaining users referencing this resolution
+                    example: 2
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/images/{id}:
+    delete:
+      tags:
+        - Images
+      summary: Delete image
+      description: |
+        Delete an uploaded image and all its resolutions.
+
+        **Deduplication Behavior:**
+        - Only removes the user's reference to the image
+        - Physical files are only deleted when the last user reference is removed
+        - Shared resolutions used by other users remain intact
+        - Prevents accidental deletion of shared content
+
+        **Cleanup Process:**
+        1. Decrement reference count for each resolution
+        2. Remove user's metadata entry
+        3. Delete physical files only when reference count reaches zero
+        4. Clean up orphaned metadata and cache entries
+
+        **Note:** This operation cannot be undone. Use with caution.
+
+      operationId: deleteImage
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+      responses:
+        '200':
+          description: Image deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - message
+                  - deleted_resolutions
+                properties:
+                  message:
+                    type: string
+                    description: Success message
+                    example: "Image deleted successfully"
+                  deleted_resolutions:
+                    type: array
+                    items:
+                      type: string
+                    description: List of resolutions that were deleted (may be empty if shared)
+                    example: ["original", "thumbnail", "800x600"]
+                  shared_resolutions:
+                    type: array
+                    items:
+                      type: string
+                    description: List of resolutions that remain shared with other users
+                    example: ["1200x900", "1920x1080"]
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /health:
     get:
@@ -584,15 +747,22 @@ paths:
       summary: Health check
       description: |
         Check the health status of the RESIZR service and its dependencies.
-        
+
         **Health Checks Include:**
         - Application status
         - Redis connectivity and response time
         - S3 storage accessibility
         - System resources (memory, disk space)
-        
+        - Deduplication system metrics and status
+
+        **Deduplication Metrics:**
+        - Total shared resolutions count
+        - Estimated storage savings
+        - Average references per resolution
+        - Deduplication ratio and efficiency
+
         This endpoint is used by load balancers and monitoring systems.
-        
+
       operationId: healthCheck
       responses:
         '200':
@@ -605,9 +775,16 @@ paths:
                 status: "healthy"
                 services:
                   redis: "connected"
-                  s3: "connected" 
+                  s3: "connected"
                   application: "healthy"
                 timestamp: "2025-09-11T10:30:00Z"
+                deduplication:
+                  enabled: true
+                  total_shared_resolutions: 1250
+                  storage_saved_mb: 450.5
+                  average_references_per_resolution: 2.3
+                  total_deduplicated_images: 2875
+                  deduplication_ratio: 0.68
         '503':
           description: Service is unhealthy
           content:
@@ -621,6 +798,13 @@ paths:
                   s3: "connected"
                   application: "degraded"
                 timestamp: "2025-09-11T10:30:00Z"
+                deduplication:
+                  enabled: true
+                  total_shared_resolutions: 1250
+                  storage_saved_mb: 450.5
+                  average_references_per_resolution: 2.3
+                  total_deduplicated_images: 2875
+                  deduplication_ratio: 0.68
 
   /debug/vars:
     get:
@@ -741,6 +925,107 @@ components:
             type: string
           description: List of available resolutions for this image (may include aliases)
           example: ["original", "thumbnail", "800x600:small", "1200x900:medium"]
+        deduplication_info:
+          type: object
+          description: Deduplication information (only present if image was deduplicated)
+          properties:
+            is_deduplicated:
+              type: boolean
+              description: Whether this image shares storage with other images
+              example: true
+            shared_image_id:
+              type: string
+              format: uuid
+              description: ID of the master image that contains the shared storage
+              example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            shared_resolutions:
+              type: array
+              items:
+                type: string
+              description: List of resolutions that are shared with other images
+              example: ["800x600", "1200x900"]
+            reference_count:
+              type: integer
+              description: Total number of images (including this one) that reference the shared content
+              example: 3
+        processing_time_ms:
+          type: integer
+          description: Time taken to process the image in milliseconds
+          example: 450
+
+    DeduplicationInfo:
+      type: object
+      description: Information about deduplicated content sharing
+      properties:
+        hash:
+          type: string
+          description: SHA-256 hash of the image content used for deduplication
+          example: "abc123def4567890abcdef1234567890abcdef1234567890abcdef123456"
+        algorithm:
+          type: string
+          description: Hash algorithm used
+          example: "SHA256"
+        master_image_id:
+          type: string
+          format: uuid
+          description: ID of the first image that uploaded this content
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        reference_count:
+          type: integer
+          description: Total number of images referencing this shared content
+          example: 5
+        storage_key:
+          type: string
+          description: S3 storage key for the shared content
+          example: "images/shared/abc123_800x600.jpg"
+        shared_resolutions:
+          type: array
+          items:
+            type: string
+          description: List of resolutions that are shared
+          example: ["800x600", "1200x900", "1920x1080"]
+
+    ResolutionReference:
+      type: object
+      description: Reference tracking for a specific resolution
+      properties:
+        resolution:
+          type: string
+          description: Resolution identifier (dimensions or alias)
+          example: "800x600"
+        referencing_image_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: List of image IDs that reference this resolution
+          example: ["f47ac10b-58cc-4372-a567-0e02b2c3d479", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"]
+        reference_count:
+          type: integer
+          description: Number of images referencing this resolution
+          example: 2
+
+    ImageHash:
+      type: object
+      description: Hash information for image deduplication
+      required:
+        - algorithm
+        - value
+        - size
+      properties:
+        algorithm:
+          type: string
+          description: Hash algorithm used
+          example: "SHA256"
+        value:
+          type: string
+          description: Hex-encoded hash value
+          example: "abc123def4567890abcdef1234567890abcdef1234567890abcdef123456"
+        size:
+          type: integer
+          format: int64
+          description: Original file size in bytes
+          example: 2048576
 
     InfoResponse:
       type: object
@@ -849,6 +1134,37 @@ components:
           format: date-time
           description: Timestamp of the health check
           example: "2025-09-11T10:30:00Z"
+        deduplication:
+          type: object
+          description: Deduplication system metrics and status
+          properties:
+            enabled:
+              type: boolean
+              description: Whether deduplication is enabled
+              example: true
+            total_shared_resolutions:
+              type: integer
+              description: Total number of shared resolution files
+              example: 1250
+            storage_saved_mb:
+              type: number
+              format: float
+              description: Estimated storage saved in megabytes
+              example: 450.5
+            average_references_per_resolution:
+              type: number
+              format: float
+              description: Average number of images referencing each shared resolution
+              example: 2.3
+            total_deduplicated_images:
+              type: integer
+              description: Total number of images that are deduplicated (share storage)
+              example: 2875
+            deduplication_ratio:
+              type: number
+              format: float
+              description: Ratio of deduplicated images to total images (0.0 to 1.0)
+              example: 0.68
 
     MetricsResponse:
       type: object
@@ -1051,6 +1367,23 @@ components:
             error: "Rate limit exceeded"
             message: "Too many requests. Please try again later"
             code: 429
+
+    Forbidden:
+      description: Access forbidden - authentication required or insufficient permissions
+      headers:
+        X-Request-ID:
+          schema:
+            type: string
+            format: uuid
+          description: Unique request identifier for tracing
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Access forbidden"
+            message: "Authentication required or insufficient permissions for this operation"
+            code: 403
 
     InternalServerError:
       description: Internal server error

@@ -26,6 +26,7 @@ type mockImageService struct {
 	processResolutionFunc    func(ctx context.Context, imageID, resolution string) error
 	generatePresignedURLFunc func(ctx context.Context, storageKey string, expiration time.Duration) (string, error)
 	deleteImageFunc          func(ctx context.Context, imageID string) error
+	deleteResolutionFunc     func(ctx context.Context, imageID, resolution string) error
 	listImagesFunc           func(ctx context.Context, offset, limit int) ([]*models.ImageMetadata, int, error)
 }
 
@@ -67,6 +68,13 @@ func (m *mockImageService) GeneratePresignedURL(ctx context.Context, storageKey 
 func (m *mockImageService) DeleteImage(ctx context.Context, imageID string) error {
 	if m.deleteImageFunc != nil {
 		return m.deleteImageFunc(ctx, imageID)
+	}
+	return nil
+}
+
+func (m *mockImageService) DeleteResolution(ctx context.Context, imageID, resolution string) error {
+	if m.deleteResolutionFunc != nil {
+		return m.deleteResolutionFunc(ctx, imageID, resolution)
 	}
 	return nil
 }

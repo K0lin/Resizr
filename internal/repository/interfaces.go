@@ -40,6 +40,40 @@ type ImageRepository interface {
 	Close() error
 }
 
+// DeduplicationRepository defines the interface for image deduplication operations
+type DeduplicationRepository interface {
+	// StoreDeduplicationInfo stores deduplication information for a hash
+	StoreDeduplicationInfo(ctx context.Context, info *models.DeduplicationInfo) error
+
+	// GetDeduplicationInfo retrieves deduplication info by hash
+	GetDeduplicationInfo(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error)
+
+	// UpdateDeduplicationInfo updates existing deduplication info
+	UpdateDeduplicationInfo(ctx context.Context, info *models.DeduplicationInfo) error
+
+	// DeleteDeduplicationInfo removes deduplication info
+	DeleteDeduplicationInfo(ctx context.Context, hash models.ImageHash) error
+
+	// FindImageByHash looks for existing images with the same hash
+	FindImageByHash(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error)
+
+	// AddHashReference adds a new image reference to existing hash
+	AddHashReference(ctx context.Context, hash models.ImageHash, imageID string) error
+
+	// RemoveHashReference removes an image reference from hash
+	RemoveHashReference(ctx context.Context, hash models.ImageHash, imageID string) error
+
+	// GetOrphanedHashes returns hashes with no image references
+	GetOrphanedHashes(ctx context.Context) ([]models.ImageHash, error)
+}
+
+// CompositeRepository combines all repository interfaces for full functionality
+type CompositeRepository interface {
+	ImageRepository
+	CacheRepository
+	DeduplicationRepository
+}
+
 // CacheRepository defines the interface for caching operations
 type CacheRepository interface {
 	// SetCachedURL stores a pre-signed URL in cache with TTL

@@ -93,7 +93,15 @@ func run() error {
 
 	// Initialize services
 	logger.Info("Initializing services...")
-	imageService := service.NewImageService(repo, store, processor, cfg)
+
+	// Cast repository to deduplication repository interface
+	dedupRepo, ok := repo.(repository.DeduplicationRepository)
+	if !ok {
+		logger.Fatal("Repository does not support deduplication")
+		return fmt.Errorf("repository does not implement DeduplicationRepository interface")
+	}
+
+	imageService := service.NewImageService(repo, dedupRepo, store, processor, cfg)
 	healthService := service.NewHealthService(repo, store, cfg, AppVersion)
 
 	// Initialize API router

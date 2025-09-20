@@ -67,7 +67,11 @@ func (h *ImageHandler) Upload(c *gin.Context) {
 		})
 		return
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			logger.WarnWithContext(ctx, "Failed to close file", zap.String("error", err.Error()))
+		}
+	}()
 
 	// Validate file size
 	if header.Size > h.config.Image.MaxFileSize {
@@ -358,7 +362,11 @@ func (h *ImageHandler) downloadImage(c *gin.Context, resolution string) {
 		h.handleServiceError(c, err, requestID, "get image stream failed")
 		return
 	}
-	defer stream.Close()
+	defer func() {
+		if err := stream.Close(); err != nil {
+			logger.WarnWithContext(ctx, "Failed to close stream", zap.String("error", err.Error()))
+		}
+	}()
 
 	// Set response headers
 	h.setImageResponseHeaders(c, metadata, resolution)
@@ -552,4 +560,131 @@ func (h *ImageHandler) isValidAlias(alias string) bool {
 	}
 
 	return true
+}
+
+// Delete removes an entire image and all its resolutions
+func (h *ImageHandler) Delete(c *gin.Context) {
+	imageID := c.Param("id")
+
+	logger.InfoWithContext(c.Request.Context(), "Deleting image",
+		zap.String("image_id", imageID))
+
+	// Validate UUID format
+	if !h.isValidUUID(imageID) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "validation_error",
+			Message: "Invalid image ID format",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	// Delete image
+	if err := h.imageService.DeleteImage(c.Request.Context(), imageID); err != nil {
+		logger.ErrorWithContext(c.Request.Context(), "Failed to delete image",
+			zap.String("image_id", imageID),
+			zap.Error(err))
+
+		// Handle different error types
+		switch err.(type) {
+		case models.NotFoundError:
+			c.JSON(http.StatusNotFound, models.ErrorResponse{
+				Error:   "image_not_found",
+				Message: fmt.Sprintf("Image with ID %s not found", imageID),
+				Code:    http.StatusNotFound,
+			})
+		case models.ValidationError:
+			c.JSON(http.StatusBadRequest, models.ErrorResponse{
+				Error:   "validation_error",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error:   "delete_failed",
+				Message: "Failed to delete image",
+				Code:    http.StatusInternalServerError,
+			})
+		}
+		return
+	}
+
+	logger.InfoWithContext(c.Request.Context(), "Image deleted successfully",
+		zap.String("image_id", imageID))
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "Image deleted successfully",
+		"image_id": imageID,
+	})
+}
+
+// DeleteResolution removes a specific resolution from an image
+func (h *ImageHandler) DeleteResolution(c *gin.Context) {
+	imageID := c.Param("id")
+	resolution := c.Param("resolution")
+
+	logger.InfoWithContext(c.Request.Context(), "Deleting resolution",
+		zap.String("image_id", imageID),
+		zap.String("resolution", resolution))
+
+	// Validate UUID format
+	if !h.isValidUUID(imageID) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "validation_error",
+			Message: "Invalid image ID format",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	// Validate resolution format (basic check)
+	if resolution == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "validation_error",
+			Message: "Resolution parameter is required",
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	// Delete resolution
+	if err := h.imageService.DeleteResolution(c.Request.Context(), imageID, resolution); err != nil {
+		logger.ErrorWithContext(c.Request.Context(), "Failed to delete resolution",
+			zap.String("image_id", imageID),
+			zap.String("resolution", resolution),
+			zap.Error(err))
+
+		// Handle different error types
+		switch err.(type) {
+		case models.NotFoundError:
+			c.JSON(http.StatusNotFound, models.ErrorResponse{
+				Error:   "resolution_not_found",
+				Message: fmt.Sprintf("Resolution %s not found for image %s", resolution, imageID),
+				Code:    http.StatusNotFound,
+			})
+		case models.ValidationError:
+			c.JSON(http.StatusBadRequest, models.ErrorResponse{
+				Error:   "validation_error",
+				Message: err.Error(),
+				Code:    http.StatusBadRequest,
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error:   "delete_failed",
+				Message: "Failed to delete resolution",
+				Code:    http.StatusInternalServerError,
+			})
+		}
+		return
+	}
+
+	logger.InfoWithContext(c.Request.Context(), "Resolution deleted successfully",
+		zap.String("image_id", imageID),
+		zap.String("resolution", resolution))
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "Resolution deleted successfully",
+		"image_id":   imageID,
+		"resolution": resolution,
+	})
 }

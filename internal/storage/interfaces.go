@@ -17,6 +17,9 @@ type ImageStorage interface {
 	// Delete removes a file from storage
 	Delete(ctx context.Context, key string) error
 
+	// DeleteFolder removes all files in a folder recursively
+	DeleteFolder(ctx context.Context, prefix string) error
+
 	// Exists checks if a file exists in storage
 	Exists(ctx context.Context, key string) (bool, error)
 
@@ -155,9 +158,9 @@ type BatchResult struct {
 type StorageProvider string
 
 const (
-	ProviderS3    StorageProvider = "s3"
-	ProviderGCS   StorageProvider = "gcs"
-	ProviderAzure StorageProvider = "azure"
-	ProviderMinIO StorageProvider = "minio"
-	ProviderLocal StorageProvider = "local"
+	_ProviderS3    StorageProvider = "s3"
+	_ProviderGCS   StorageProvider = "gcs"
+	_ProviderAzure StorageProvider = "azure"
+	_ProviderMinIO StorageProvider = "minio"
+	_ProviderLocal StorageProvider = "local"
 )

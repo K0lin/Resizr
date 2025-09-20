@@ -1,0 +1,371 @@
+package service
+
+import (
+	"context"
+	"testing"
+
+	"resizr/internal/models"
+	"resizr/internal/testutil"
+
+	"github.com/stretchr/testify/assert"
+)
+
+// TestDeduplicationInfo_ResolutionReferenceTracking tests the resolution reference tracking functionality
+func TestDeduplicationInfo_ResolutionReferenceTracking(t *testing.T) {
+	t.Run("add_resolution_reference", func(t *testing.T) {
+		hash := models.ImageHash{
+			Value:     "test-hash",
+			Algorithm: "SHA256",
+			Size:      1024,
+		}
+		dedupInfo := models.NewDeduplicationInfo(hash, "master-image-id", "images/master-image-id/original.jpg")
+
+		// Add resolution reference
+		dedupInfo.AddResolutionReference("800x600", "user-image-1")
+		dedupInfo.AddResolutionReference("800x600", "user-image-2")
+		dedupInfo.AddResolutionReference("100x100", "user-image-1")
+
+		// Verify references
+		assert.Equal(t, 2, dedupInfo.GetResolutionReferenceCount("800x600"))
+		assert.Equal(t, 1, dedupInfo.GetResolutionReferenceCount("100x100"))
+		assert.Equal(t, 0, dedupInfo.GetResolutionReferenceCount("1920x1080"))
+	})
+
+	t.Run("remove_resolution_reference", func(t *testing.T) {
+		hash := models.ImageHash{
+			Value:     "test-hash",
+			Algorithm: "SHA256",
+			Size:      1024,
+		}
+		dedupInfo := models.NewDeduplicationInfo(hash, "master-image-id", "images/master-image-id/original.jpg")
+
+		// Add references
+		dedupInfo.AddResolutionReference("800x600", "user-image-1")
+		dedupInfo.AddResolutionReference("800x600", "user-image-2")
+		dedupInfo.AddResolutionReference("100x100", "user-image-1")
+
+		// Remove one reference
+		dedupInfo.RemoveResolutionReference("800x600", "user-image-1")
+
+		// Verify remaining references
+		assert.Equal(t, 1, dedupInfo.GetResolutionReferenceCount("800x600"))
+		assert.Equal(t, 1, dedupInfo.GetResolutionReferenceCount("100x100"))
+	})
+
+	t.Run("remove_last_resolution_reference", func(t *testing.T) {
+		hash := models.ImageHash{
+			Value:     "test-hash",
+			Algorithm: "SHA256",
+			Size:      1024,
+		}
+		dedupInfo := models.NewDeduplicationInfo(hash, "master-image-id", "images/master-image-id/original.jpg")
+
+		// Add single reference
+		dedupInfo.AddResolutionReference("100x100", "user-image-1")
+
+		// Remove last reference
+		dedupInfo.RemoveResolutionReference("100x100", "user-image-1")
+
+		// Verify no references remain
+		assert.Equal(t, 0, dedupInfo.GetResolutionReferenceCount("100x100"))
+	})
+
+	t.Run("remove_nonexistent_reference", func(t *testing.T) {
+		hash := models.ImageHash{
+			Value:     "test-hash",
+			Algorithm: "SHA256",
+			Size:      1024,
+		}
+		dedupInfo := models.NewDeduplicationInfo(hash, "master-image-id", "images/master-image-id/original.jpg")
+
+		// Try to remove non-existent reference
+		assert.NotPanics(t, func() {
+			dedupInfo.RemoveResolutionReference("800x600", "nonexistent-image")
+		})
+
+		// Verify no change
+		assert.Equal(t, 0, dedupInfo.GetResolutionReferenceCount("800x600"))
+	})
+}
+
+// TestImageService_DeduplicationCleanup tests the deduplication cleanup logic
+func TestImageService_DeduplicationCleanup(t *testing.T) {
+	t.Run("deduplicated_image_cleanup", func(t *testing.T) {
+		mockRepo := &testutil.MockImageRepository{
+			GetFunc: func(ctx context.Context, id string) (*models.ImageMetadata, error) {
+				return &models.ImageMetadata{
+					ID:            id,
+					Hash:          models.ImageHash{Value: "test-hash", Algorithm: "SHA256", Size: 1024},
+					IsDeduped:     true,
+					SharedImageID: "master-image-id",
+					Resolutions:   []string{"original", "800x600", "100x100"},
+				}, nil
+			},
+			DeleteFunc: func(ctx context.Context, id string) error {
+				return nil
+			},
+		}
+
+		mockDeduplicationRepo := &testutil.MockDeduplicationRepository{
+			GetDeduplicationInfoFunc: func(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+				return &models.DeduplicationInfo{
+					MasterImageID:  "master-image-id",
+					Hash:           models.ImageHash{Value: "test-hash", Algorithm: "SHA256", Size: 1024},
+					ReferencingIDs: []string{"other-image-id"}, // Still has other references
+					ResolutionRefs: map[string]*models.ResolutionReference{
+						"800x600": {ReferencingIDs: []string{"other-image-id"}}, // 800x600 still used by others
+						"100x100": {ReferencingIDs: []string{"test-image-id"}},  // 100x100 only used by this image
+					},
+				}, nil
+			},
+			UpdateDeduplicationInfoFunc: func(ctx context.Context, info *models.DeduplicationInfo) error {
+				return nil
+			},
+		}
+
+		mockStorage := &testutil.MockStorageProvider{
+			DeleteFunc: func(ctx context.Context, key string) error {
+				return nil
+			},
+		}
+
+		mockProcessor := &testutil.MockProcessorService{}
+
+		service := NewImageService(mockRepo, mockDeduplicationRepo, mockStorage, mockProcessor, testutil.TestConfig())
+
+		// Execute deletion
+		err := service.DeleteImage(context.Background(), "test-image-id")
+
+		// Verify results
+		assert.NoError(t, err)
+	})
+
+	t.Run("last_reference_cleanup", func(t *testing.T) {
+		mockRepo := &testutil.MockImageRepository{
+			GetFunc: func(ctx context.Context, id string) (*models.ImageMetadata, error) {
+				return &models.ImageMetadata{
+					ID:            id,
+					Hash:          models.ImageHash{Value: "test-hash", Algorithm: "SHA256", Size: 1024},
+					IsDeduped:     true,
+					SharedImageID: "master-image-id",
+					Resolutions:   []string{"original", "800x600"},
+				}, nil
+			},
+			DeleteFunc: func(ctx context.Context, id string) error {
+				return nil
+			},
+		}
+
+		mockDeduplicationRepo := &testutil.MockDeduplicationRepository{
+			GetDeduplicationInfoFunc: func(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+				return &models.DeduplicationInfo{
+					MasterImageID:  "master-image-id",
+					Hash:           models.ImageHash{Value: "test-hash", Algorithm: "SHA256", Size: 1024},
+					ReferencingIDs: []string{"test-image-id"}, // This is the last reference
+					ResolutionRefs: map[string]*models.ResolutionReference{
+						"original": {ReferencingIDs: []string{"test-image-id"}},
+						"800x600":  {ReferencingIDs: []string{"test-image-id"}},
+					},
+				}, nil
+			},
+			DeleteDeduplicationInfoFunc: func(ctx context.Context, hash models.ImageHash) error {
+				return nil
+			},
+		}
+
+		mockStorage := &testutil.MockStorageProvider{
+			DeleteFunc: func(ctx context.Context, key string) error {
+				return nil
+			},
+		}
+
+		mockProcessor := &testutil.MockProcessorService{}
+
+		service := NewImageService(mockRepo, mockDeduplicationRepo, mockStorage, mockProcessor, testutil.TestConfig())
+
+		// Execute deletion
+		err := service.DeleteImage(context.Background(), "test-image-id")
+
+		// Verify results
+		assert.NoError(t, err)
+	})
+
+	t.Run("non_deduplicated_image_cleanup", func(t *testing.T) {
+		mockRepo := &testutil.MockImageRepository{
+			GetFunc: func(ctx context.Context, id string) (*models.ImageMetadata, error) {
+				return &models.ImageMetadata{
+					ID:          id,
+					Hash:        models.ImageHash{}, // Empty hash means non-deduplicated
+					IsDeduped:   false,
+					Resolutions: []string{"original", "800x600", "100x100"},
+				}, nil
+			},
+			DeleteFunc: func(ctx context.Context, id string) error {
+				return nil
+			},
+		}
+
+		mockDeduplicationRepo := &testutil.MockDeduplicationRepository{}
+
+		mockStorage := &testutil.MockStorageProvider{
+			DeleteFunc: func(ctx context.Context, key string) error {
+				return nil
+			},
+		}
+
+		mockProcessor := &testutil.MockProcessorService{}
+
+		service := NewImageService(mockRepo, mockDeduplicationRepo, mockStorage, mockProcessor, testutil.TestConfig())
+
+		// Execute deletion
+		err := service.DeleteImage(context.Background(), "test-image-id")
+
+		// Verify results
+		assert.NoError(t, err)
+	})
+}
+
+// TestImageService_ResolutionTrackingPerUser tests the per-user resolution tracking
+func TestImageService_ResolutionTrackingPerUser(t *testing.T) {
+	t.Run("shared_resolution_preservation", func(t *testing.T) {
+		mockRepo := &testutil.MockImageRepository{
+			GetFunc: func(ctx context.Context, id string) (*models.ImageMetadata, error) {
+				return &models.ImageMetadata{
+					ID:            id,
+					Hash:          models.ImageHash{Value: "test-hash", Algorithm: "SHA256", Size: 1024},
+					IsDeduped:     true,
+					SharedImageID: "master-image-id",
+					Resolutions:   []string{"original", "800x600", "100x100"},
+				}, nil
+			},
+			DeleteFunc: func(ctx context.Context, id string) error {
+				return nil
+			},
+		}
+
+		mockDeduplicationRepo := &testutil.MockDeduplicationRepository{
+			GetDeduplicationInfoFunc: func(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+				return &models.DeduplicationInfo{
+					MasterImageID:  "master-image-id",
+					Hash:           models.ImageHash{Value: "test-hash", Algorithm: "SHA256", Size: 1024},
+					ReferencingIDs: []string{"user-a-image-id", "user-b-image-id"}, // User A still has reference
+					ResolutionRefs: map[string]*models.ResolutionReference{
+						"original": {ReferencingIDs: []string{"user-a-image-id", "user-b-image-id"}}, // Both users use original
+						"800x600":  {ReferencingIDs: []string{"user-a-image-id", "user-b-image-id"}}, // Both users use 800x600
+						"100x100":  {ReferencingIDs: []string{"user-b-image-id"}},                    // Only User B uses 100x100
+					},
+				}, nil
+			},
+			UpdateDeduplicationInfoFunc: func(ctx context.Context, info *models.DeduplicationInfo) error {
+				return nil
+			},
+		}
+
+		mockStorage := &testutil.MockStorageProvider{
+			DeleteFunc: func(ctx context.Context, key string) error {
+				return nil
+			},
+		}
+
+		mockProcessor := &testutil.MockProcessorService{}
+
+		service := NewImageService(mockRepo, mockDeduplicationRepo, mockStorage, mockProcessor, testutil.TestConfig())
+
+		// Execute deletion
+		err := service.DeleteImage(context.Background(), "user-b-image-id")
+
+		// Verify results
+		assert.NoError(t, err)
+	})
+
+	t.Run("final_cleanup_when_last_user_deletes", func(t *testing.T) {
+		mockRepo := &testutil.MockImageRepository{
+			GetFunc: func(ctx context.Context, id string) (*models.ImageMetadata, error) {
+				return &models.ImageMetadata{
+					ID:            id,
+					Hash:          models.ImageHash{Value: "test-hash", Algorithm: "SHA256", Size: 1024},
+					IsDeduped:     true,
+					SharedImageID: "master-image-id",
+					Resolutions:   []string{"original", "800x600"},
+				}, nil
+			},
+			DeleteFunc: func(ctx context.Context, id string) error {
+				return nil
+			},
+		}
+
+		mockDeduplicationRepo := &testutil.MockDeduplicationRepository{
+			GetDeduplicationInfoFunc: func(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+				return &models.DeduplicationInfo{
+					MasterImageID:  "master-image-id",
+					Hash:           models.ImageHash{Value: "test-hash", Algorithm: "SHA256", Size: 1024},
+					ReferencingIDs: []string{"user-a-image-id"}, // User A is the last reference
+					ResolutionRefs: map[string]*models.ResolutionReference{
+						"original": {ReferencingIDs: []string{"user-a-image-id"}},
+						"800x600":  {ReferencingIDs: []string{"user-a-image-id"}},
+					},
+				}, nil
+			},
+			DeleteDeduplicationInfoFunc: func(ctx context.Context, hash models.ImageHash) error {
+				return nil
+			},
+		}
+
+		mockStorage := &testutil.MockStorageProvider{
+			DeleteFunc: func(ctx context.Context, key string) error {
+				return nil
+			},
+		}
+
+		mockProcessor := &testutil.MockProcessorService{}
+
+		service := NewImageService(mockRepo, mockDeduplicationRepo, mockStorage, mockProcessor, testutil.TestConfig())
+
+		// Execute deletion
+		err := service.DeleteImage(context.Background(), "user-a-image-id")
+
+		// Verify results
+		assert.NoError(t, err)
+	})
+}
+
+// TestImageService_ErrorHandling tests error handling in deduplication scenarios
+func TestImageService_ErrorHandling(t *testing.T) {
+	t.Run("deduplication_info_not_found", func(t *testing.T) {
+		mockRepo := &testutil.MockImageRepository{
+			GetFunc: func(ctx context.Context, id string) (*models.ImageMetadata, error) {
+				return &models.ImageMetadata{
+					ID:          id,
+					Hash:        models.ImageHash{Value: "test-hash", Algorithm: "SHA256", Size: 1024},
+					IsDeduped:   true,
+					Resolutions: []string{"original", "800x600"},
+				}, nil
+			},
+			DeleteFunc: func(ctx context.Context, id string) error {
+				return nil
+			},
+		}
+
+		mockDeduplicationRepo := &testutil.MockDeduplicationRepository{
+			GetDeduplicationInfoFunc: func(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+				return nil, models.NotFoundError{Resource: "deduplication_info", ID: "test-hash"}
+			},
+		}
+
+		mockStorage := &testutil.MockStorageProvider{
+			DeleteFunc: func(ctx context.Context, key string) error {
+				return nil
+			},
+		}
+
+		mockProcessor := &testutil.MockProcessorService{}
+
+		service := NewImageService(mockRepo, mockDeduplicationRepo, mockStorage, mockProcessor, testutil.TestConfig())
+
+		// Execute deletion
+		err := service.DeleteImage(context.Background(), "test-image-id")
+
+		// Should succeed despite deduplication info not being found
+		assert.NoError(t, err)
+	})
+}

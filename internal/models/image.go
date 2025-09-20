@@ -11,16 +11,19 @@ import (
 
 // ImageMetadata represents image metadata stored in Redis
 type ImageMetadata struct {
-	ID          string    `json:"id" redis:"id"`
-	OriginalKey string    `json:"original_key" redis:"original_key"`
-	Filename    string    `json:"filename" redis:"filename"`
-	MimeType    string    `json:"mime_type" redis:"mime_type"`
-	Size        int64     `json:"size" redis:"size"`
-	Width       int       `json:"width" redis:"width"`
-	Height      int       `json:"height" redis:"height"`
-	Resolutions []string  `json:"resolutions" redis:"resolutions"`
-	CreatedAt   time.Time `json:"created_at" redis:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" redis:"updated_at"`
+	ID            string    `json:"id" redis:"id"`
+	OriginalKey   string    `json:"original_key" redis:"original_key"`
+	Filename      string    `json:"filename" redis:"filename"`
+	MimeType      string    `json:"mime_type" redis:"mime_type"`
+	Size          int64     `json:"size" redis:"size"`
+	Width         int       `json:"width" redis:"width"`
+	Height        int       `json:"height" redis:"height"`
+	Resolutions   []string  `json:"resolutions" redis:"resolutions"`
+	CreatedAt     time.Time `json:"created_at" redis:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at" redis:"updated_at"`
+	Hash          ImageHash `json:"hash" redis:"hash"`                       // Hash for deduplication
+	IsDeduped     bool      `json:"is_deduped" redis:"is_deduped"`           // True if this image shares storage with others
+	SharedImageID string    `json:"shared_image_id" redis:"shared_image_id"` // ID of the master image (if deduplicated)
 }
 
 // ResolutionConfig defines image resolution parameters
@@ -441,15 +444,47 @@ func FormatResolutionWithAlias(width, height int, alias string) string {
 func NewImageMetadata(id, filename, mimeType string, size int64, width, height int) *ImageMetadata {
 	now := time.Now()
 	return &ImageMetadata{
-		ID:          id,
-		OriginalKey: fmt.Sprintf("images/%s/original.%s", id, GetExtensionFromMimeType(mimeType)),
-		Filename:    filename,
-		MimeType:    mimeType,
-		Size:        size,
-		Width:       width,
-		Height:      height,
-		Resolutions: []string{},
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:            id,
+		OriginalKey:   fmt.Sprintf("images/%s/original.%s", id, GetExtensionFromMimeType(mimeType)),
+		Filename:      filename,
+		MimeType:      mimeType,
+		Size:          size,
+		Width:         width,
+		Height:        height,
+		Resolutions:   []string{},
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		Hash:          ImageHash{}, // Will be set later
+		IsDeduped:     false,
+		SharedImageID: "",
 	}
+}
+
+// NewImageMetadataWithHash creates a new ImageMetadata with hash information
+func NewImageMetadataWithHash(id, filename, mimeType string, size int64, width, height int, hash ImageHash) *ImageMetadata {
+	metadata := NewImageMetadata(id, filename, mimeType, size, width, height)
+	metadata.Hash = hash
+	return metadata
+}
+
+// GetActualStorageKey returns the actual storage key (considers deduplication)
+func (im *ImageMetadata) GetActualStorageKey(resolution string) string {
+	if im.IsDeduped && im.SharedImageID != "" {
+		// Use shared image's storage key
+		ext := im.GetFileExtension()
+		if resolution == "original" {
+			return fmt.Sprintf("images/%s/original.%s", im.SharedImageID, ext)
+		}
+		dimensions := im.ResolveToDimensions(resolution)
+		return fmt.Sprintf("images/%s/%s.%s", im.SharedImageID, dimensions, ext)
+	}
+	// Use own storage key
+	return im.GetStorageKey(resolution)
+}
+
+// MarkAsDeduped marks this image as sharing storage with another image
+func (im *ImageMetadata) MarkAsDeduped(sharedImageID string) {
+	im.IsDeduped = true
+	im.SharedImageID = sharedImageID
+	im.UpdatedAt = time.Now()
 }

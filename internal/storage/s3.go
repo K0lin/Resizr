@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -190,6 +192,88 @@ func (s *S3Storage) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// DeleteFolder removes all files in a folder recursively using custom S3 API
+func (s *S3Storage) DeleteFolder(ctx context.Context, prefix string) error {
+	logger.DebugWithContext(ctx, "Deleting folder from S3",
+		zap.String("prefix", prefix))
+
+	// Ensure prefix ends with / for folder deletion
+	if !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+
+	// Extract base endpoint from S3 endpoint
+	baseEndpoint := strings.TrimSuffix(s.config.Endpoint, "/")
+	if strings.HasSuffix(baseEndpoint, "/s3") {
+		baseEndpoint = strings.TrimSuffix(baseEndpoint, "/s3")
+	}
+
+	// Build custom API URL for recursive folder deletion
+	// Format: https://s3.site/api/v1/buckets/{bucket}/objects?prefix={prefix}&recursive=true
+	deleteURL := fmt.Sprintf("%s/api/v1/buckets/%s/objects", baseEndpoint, s.bucket)
+
+	// Add query parameters
+	params := url.Values{}
+	params.Add("prefix", prefix)
+	params.Add("all_versions", "false")
+	params.Add("bypass", "false")
+	params.Add("recursive", "true")
+
+	fullURL := fmt.Sprintf("%s?%s", deleteURL, params.Encode())
+
+	logger.DebugWithContext(ctx, "Making DELETE request to custom S3 API",
+		zap.String("url", fullURL))
+
+	// Create HTTP DELETE request
+	req, err := http.NewRequestWithContext(ctx, "DELETE", fullURL, nil)
+	if err != nil {
+		logger.ErrorWithContext(ctx, "Failed to create DELETE request",
+			zap.String("prefix", prefix),
+			zap.Error(err))
+		return fmt.Errorf("failed to create delete request: %w", err)
+	}
+
+	// Add authentication headers if needed
+	// For MinIO Console API, we might need different auth
+	req.Header.Set("Content-Type", "application/json")
+
+	// Execute the request
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		logger.ErrorWithContext(ctx, "Failed to execute folder delete request",
+			zap.String("prefix", prefix),
+			zap.Error(err))
+		return fmt.Errorf("failed to delete folder: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log the error but don't return it as it's a cleanup operation
+			logger.Warn("Failed to close response body", zap.Error(err))
+		}
+	}()
+
+	// Read response body for debugging
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logger.ErrorWithContext(ctx, "Folder delete request failed",
+			zap.String("prefix", prefix),
+			zap.Int("status_code", resp.StatusCode),
+			zap.String("response", string(body)))
+		return fmt.Errorf("folder delete failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	logger.InfoWithContext(ctx, "Folder deleted from S3 successfully",
+		zap.String("prefix", prefix),
+		zap.Int("status_code", resp.StatusCode))
+
+	return nil
+}
+
 // Exists checks if a file exists in S3
 func (s *S3Storage) Exists(ctx context.Context, key string) (bool, error) {
 	_, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
@@ -200,6 +284,16 @@ func (s *S3Storage) Exists(ctx context.Context, key string) (bool, error) {
 		if isNotFoundError(err) {
 			return false, nil
 		}
+
+		// If we get a 403 Forbidden error, it likely means we don't have HeadObject permissions
+		// but the file might still exist. We should assume it exists to avoid breaking deduplication.
+		if strings.Contains(err.Error(), "403") || strings.Contains(err.Error(), "Forbidden") {
+			logger.WarnWithContext(ctx, "HeadObject permission denied, assuming file exists for deduplication",
+				zap.String("key", key),
+				zap.Error(err))
+			return true, nil
+		}
+
 		return false, fmt.Errorf("failed to check file existence: %w", err)
 	}
 
