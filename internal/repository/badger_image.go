@@ -22,9 +22,10 @@ type BadgerImageRepository struct {
 	*BadgerRepository // Embed for Cache functionality
 }
 
-// Ensure BadgerImageRepository implements both interfaces
+// Ensure BadgerImageRepository implements all interfaces
 var _ ImageRepository = (*BadgerImageRepository)(nil)
 var _ CacheRepository = (*BadgerImageRepository)(nil)
+var _ DeduplicationRepository = (*BadgerImageRepository)(nil)
 
 // NewBadgerImageRepository creates a new BadgerDB-based ImageRepository
 func NewBadgerImageRepository(cfg *CacheConfig) (*BadgerImageRepository, error) {
@@ -189,7 +190,7 @@ func (b *BadgerImageRepository) Delete(ctx context.Context, id string) error {
 }
 
 // Exists checks if image metadata exists
-func (b *BadgerImageRepository) Exists(ctx context.Context, id string) (bool, error) {
+func (b *BadgerImageRepository) Exists(_ctx context.Context, id string) (bool, error) {
 	key := b.getMetadataKey(id)
 
 	err := b.db.View(func(txn *badger.Txn) error {
@@ -399,7 +400,7 @@ func (b *BadgerImageRepository) extractIDFromMetadataKey(key string) string {
 }
 
 // countImages counts total number of images
-func (b *BadgerImageRepository) countImages(ctx context.Context) (int64, error) {
+func (b *BadgerImageRepository) countImages(_ctx context.Context) (int64, error) {
 	var count int64
 	prefix := "image:metadata:"
 
@@ -419,7 +420,7 @@ func (b *BadgerImageRepository) countImages(ctx context.Context) (int64, error) 
 }
 
 // countCacheKeys counts total number of cache keys
-func (b *BadgerImageRepository) countCacheKeys(ctx context.Context) (int64, error) {
+func (b *BadgerImageRepository) countCacheKeys(_ctx context.Context) (int64, error) {
 	var count int64
 	prefix := "image:cache:"
 
@@ -436,4 +437,178 @@ func (b *BadgerImageRepository) countCacheKeys(ctx context.Context) (int64, erro
 	})
 
 	return count, err
+}
+
+// DeduplicationRepository implementation
+
+// StoreDeduplicationInfo stores deduplication information for a hash
+func (b *BadgerImageRepository) StoreDeduplicationInfo(ctx context.Context, info *models.DeduplicationInfo) error {
+	logger.DebugWithContext(ctx, "Storing deduplication info",
+		zap.String("hash", info.Hash.String()),
+		zap.String("master_image_id", info.MasterImageID))
+
+	key := b.getDeduplicationKey(info.Hash)
+
+	// Serialize to JSON
+	data, err := json.Marshal(info)
+	if err != nil {
+		return fmt.Errorf("failed to marshal deduplication info: %w", err)
+	}
+
+	// Store in BadgerDB
+	err = b.db.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(key), data)
+	})
+
+	if err != nil {
+		logger.ErrorWithContext(ctx, "Failed to store deduplication info",
+			zap.String("hash", info.Hash.String()),
+			zap.Error(err))
+		return fmt.Errorf("failed to store deduplication info: %w", err)
+	}
+
+	return nil
+}
+
+// GetDeduplicationInfo retrieves deduplication info by hash
+func (b *BadgerImageRepository) GetDeduplicationInfo(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+	logger.DebugWithContext(ctx, "Getting deduplication info",
+		zap.String("hash", hash.String()))
+
+	key := b.getDeduplicationKey(hash)
+
+	var info models.DeduplicationInfo
+	err := b.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(key))
+		if err != nil {
+			return err
+		}
+
+		return item.Value(func(val []byte) error {
+			return json.Unmarshal(val, &info)
+		})
+	})
+
+	if err != nil {
+		if err == badger.ErrKeyNotFound {
+			return nil, models.NotFoundError{
+				Resource: "deduplication_info",
+				ID:       hash.String(),
+			}
+		}
+		return nil, fmt.Errorf("failed to get deduplication info: %w", err)
+	}
+
+	return &info, nil
+}
+
+// UpdateDeduplicationInfo updates existing deduplication info
+func (b *BadgerImageRepository) UpdateDeduplicationInfo(ctx context.Context, info *models.DeduplicationInfo) error {
+	return b.StoreDeduplicationInfo(ctx, info)
+}
+
+// DeleteDeduplicationInfo removes deduplication info
+func (b *BadgerImageRepository) DeleteDeduplicationInfo(ctx context.Context, hash models.ImageHash) error {
+	logger.DebugWithContext(ctx, "Deleting deduplication info",
+		zap.String("hash", hash.String()))
+
+	key := b.getDeduplicationKey(hash)
+
+	err := b.db.Update(func(txn *badger.Txn) error {
+		return txn.Delete([]byte(key))
+	})
+
+	if err != nil {
+		logger.ErrorWithContext(ctx, "Failed to delete deduplication info",
+			zap.String("hash", hash.String()),
+			zap.Error(err))
+		return fmt.Errorf("failed to delete deduplication info: %w", err)
+	}
+
+	return nil
+}
+
+// FindImageByHash looks for existing images with the same hash
+func (b *BadgerImageRepository) FindImageByHash(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+	return b.GetDeduplicationInfo(ctx, hash)
+}
+
+// AddHashReference adds a new image reference to existing hash
+func (b *BadgerImageRepository) AddHashReference(ctx context.Context, hash models.ImageHash, imageID string) error {
+	logger.DebugWithContext(ctx, "Adding hash reference",
+		zap.String("hash", hash.String()),
+		zap.String("image_id", imageID))
+
+	info, err := b.GetDeduplicationInfo(ctx, hash)
+	if err != nil {
+		return err
+	}
+
+	info.AddReference(imageID)
+	return b.UpdateDeduplicationInfo(ctx, info)
+}
+
+// RemoveHashReference removes an image reference from hash
+func (b *BadgerImageRepository) RemoveHashReference(ctx context.Context, hash models.ImageHash, imageID string) error {
+	logger.DebugWithContext(ctx, "Removing hash reference",
+		zap.String("hash", hash.String()),
+		zap.String("image_id", imageID))
+
+	info, err := b.GetDeduplicationInfo(ctx, hash)
+	if err != nil {
+		return err
+	}
+
+	info.RemoveReference(imageID)
+
+	// If no more references, delete the deduplication info
+	if info.IsOrphaned() {
+		return b.DeleteDeduplicationInfo(ctx, hash)
+	}
+
+	return b.UpdateDeduplicationInfo(ctx, info)
+}
+
+// GetOrphanedHashes returns hashes with no image references
+func (b *BadgerImageRepository) GetOrphanedHashes(ctx context.Context) ([]models.ImageHash, error) {
+	var orphanedHashes []models.ImageHash
+	prefix := "dedup:"
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		iter := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer iter.Close()
+
+		for iter.Seek([]byte(prefix)); iter.ValidForPrefix([]byte(prefix)); iter.Next() {
+			item := iter.Item()
+
+			err := item.Value(func(val []byte) error {
+				var info models.DeduplicationInfo
+				if err := json.Unmarshal(val, &info); err != nil {
+					return err
+				}
+
+				if info.IsOrphaned() {
+					orphanedHashes = append(orphanedHashes, info.Hash)
+				}
+				return nil
+			})
+
+			if err != nil {
+				logger.WarnWithContext(ctx, "Failed to unmarshal deduplication info during orphan check",
+					zap.String("key", string(item.Key())),
+					zap.Error(err))
+				continue
+			}
+		}
+		return nil
+	})
+
+	return orphanedHashes, err
+}
+
+// Helper methods for deduplication
+
+// getDeduplicationKey returns the key for storing deduplication info
+func (b *BadgerImageRepository) getDeduplicationKey(hash models.ImageHash) string {
+	return fmt.Sprintf("dedup:%s", hash.GetHashKey())
 }

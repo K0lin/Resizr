@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// RedisRepository implements ImageRepository and CacheRepository interfaces
+// RedisRepository implements ImageRepository, CacheRepository, and DeduplicationRepository interfaces
 type RedisRepository struct {
 	client redis.Cmdable
 	config *config.RedisConfig
@@ -187,7 +187,7 @@ func (r *RedisRepository) Delete(ctx context.Context, id string) error {
 	}
 
 	// Clean up cached URLs for this image
-	r.DeleteAllCachedURLs(ctx, id)
+	_ = r.DeleteAllCachedURLs(ctx, id)
 
 	logger.InfoWithContext(ctx, "Image metadata deleted successfully",
 		zap.String("image_id", id))
@@ -490,18 +490,29 @@ func (r *RedisRepository) extractIDFromKey(key string) string {
 
 // metadataToFields converts ImageMetadata to Redis hash fields
 func (r *RedisRepository) metadataToFields(img *models.ImageMetadata) map[string]interface{} {
-	return map[string]interface{}{
-		"id":           img.ID,
-		"original_key": img.OriginalKey,
-		"filename":     img.Filename,
-		"mime_type":    img.MimeType,
-		"size":         img.Size,
-		"width":        img.Width,
-		"height":       img.Height,
-		"resolutions":  strings.Join(img.Resolutions, ","),
-		"created_at":   img.CreatedAt.Format(time.RFC3339),
-		"updated_at":   img.UpdatedAt.Format(time.RFC3339),
+	fields := map[string]interface{}{
+		"id":              img.ID,
+		"original_key":    img.OriginalKey,
+		"filename":        img.Filename,
+		"mime_type":       img.MimeType,
+		"size":            img.Size,
+		"width":           img.Width,
+		"height":          img.Height,
+		"resolutions":     strings.Join(img.Resolutions, ","),
+		"created_at":      img.CreatedAt.Format(time.RFC3339),
+		"updated_at":      img.UpdatedAt.Format(time.RFC3339),
+		"is_deduped":      img.IsDeduped,
+		"shared_image_id": img.SharedImageID,
 	}
+
+	// Add hash fields if hash is set
+	if img.Hash.Value != "" {
+		fields["hash_algorithm"] = img.Hash.Algorithm
+		fields["hash_value"] = img.Hash.Value
+		fields["hash_size"] = img.Hash.Size
+	}
+
+	return fields
 }
 
 // fieldsToMetadata converts Redis hash fields to ImageMetadata
@@ -545,6 +556,30 @@ func (r *RedisRepository) fieldsToMetadata(fields map[string]string) (*models.Im
 		}
 	}
 
+	// Parse deduplication fields
+	if isDedupedStr := fields["is_deduped"]; isDedupedStr != "" {
+		if isDeduped, err := strconv.ParseBool(isDedupedStr); err == nil {
+			img.IsDeduped = isDeduped
+		}
+	}
+
+	img.SharedImageID = fields["shared_image_id"]
+
+	// Parse hash fields if they exist
+	if hashValue := fields["hash_value"]; hashValue != "" {
+		img.Hash.Value = hashValue
+		img.Hash.Algorithm = fields["hash_algorithm"]
+		if img.Hash.Algorithm == "" {
+			img.Hash.Algorithm = "SHA256" // Default algorithm
+		}
+
+		if hashSizeStr := fields["hash_size"]; hashSizeStr != "" {
+			if hashSize, err := strconv.ParseInt(hashSizeStr, 10, 64); err == nil {
+				img.Hash.Size = hashSize
+			}
+		}
+	}
+
 	return img, nil
 }
 
@@ -582,7 +617,7 @@ func (r *RedisRepository) countImages(ctx context.Context) (int64, error) {
 }
 
 // countCacheKeys counts total number of cache keys
-func (r *RedisRepository) countCacheKeys(ctx context.Context) int64 {
+func (r *RedisRepository) countCacheKeys(_ctx context.Context) int64 {
 	keys, err := r.findKeysByPattern(context.Background(), "image:cache:*")
 	if err != nil {
 		return 0
@@ -603,4 +638,162 @@ func (r *RedisRepository) parseInfoValue(info, key string) int64 {
 		}
 	}
 	return 0
+}
+
+// Ensure RedisRepository implements all interfaces
+var _ ImageRepository = (*RedisRepository)(nil)
+var _ CacheRepository = (*RedisRepository)(nil)
+var _ DeduplicationRepository = (*RedisRepository)(nil)
+
+// DeduplicationRepository implementation for Redis
+
+// StoreDeduplicationInfo stores deduplication information for a hash
+func (r *RedisRepository) StoreDeduplicationInfo(ctx context.Context, info *models.DeduplicationInfo) error {
+	key := fmt.Sprintf("dedup:%s", info.Hash.GetHashKey())
+
+	data := map[string]interface{}{
+		"hash_algorithm":  info.Hash.Algorithm,
+		"hash_value":      info.Hash.Value,
+		"hash_size":       info.Hash.Size,
+		"master_image_id": info.MasterImageID,
+		"reference_count": info.ReferenceCount,
+		"storage_key":     info.StorageKey,
+		"referencing_ids": strings.Join(info.ReferencingIDs, ","),
+	}
+
+	return r.client.HMSet(ctx, key, data).Err()
+}
+
+// GetDeduplicationInfo retrieves deduplication info by hash
+func (r *RedisRepository) GetDeduplicationInfo(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+	key := fmt.Sprintf("dedup:%s", hash.GetHashKey())
+
+	data, err := r.client.HGetAll(ctx, key).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(data) == 0 {
+		return nil, models.NotFoundError{
+			Resource: "deduplication_info",
+			ID:       hash.String(),
+		}
+	}
+
+	// Parse the data
+	info := &models.DeduplicationInfo{
+		Hash: models.ImageHash{
+			Algorithm: data["hash_algorithm"],
+			Value:     data["hash_value"],
+		},
+		MasterImageID: data["master_image_id"],
+		StorageKey:    data["storage_key"],
+	}
+
+	// Parse size
+	if sizeStr, ok := data["hash_size"]; ok {
+		if size, err := strconv.ParseInt(sizeStr, 10, 64); err == nil {
+			info.Hash.Size = size
+		}
+	}
+
+	// Parse reference count
+	if countStr, ok := data["reference_count"]; ok {
+		if count, err := strconv.Atoi(countStr); err == nil {
+			info.ReferenceCount = count
+		}
+	}
+
+	// Parse referencing IDs
+	if idsStr, ok := data["referencing_ids"]; ok && idsStr != "" {
+		info.ReferencingIDs = strings.Split(idsStr, ",")
+	}
+
+	return info, nil
+}
+
+// UpdateDeduplicationInfo updates existing deduplication info
+func (r *RedisRepository) UpdateDeduplicationInfo(ctx context.Context, info *models.DeduplicationInfo) error {
+	return r.StoreDeduplicationInfo(ctx, info)
+}
+
+// DeleteDeduplicationInfo removes deduplication info
+func (r *RedisRepository) DeleteDeduplicationInfo(ctx context.Context, hash models.ImageHash) error {
+	key := fmt.Sprintf("dedup:%s", hash.GetHashKey())
+	return r.client.Del(ctx, key).Err()
+}
+
+// FindImageByHash looks for existing images with the same hash
+func (r *RedisRepository) FindImageByHash(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+	return r.GetDeduplicationInfo(ctx, hash)
+}
+
+// AddHashReference adds a new image reference to existing hash
+func (r *RedisRepository) AddHashReference(ctx context.Context, hash models.ImageHash, imageID string) error {
+	info, err := r.GetDeduplicationInfo(ctx, hash)
+	if err != nil {
+		return err
+	}
+
+	info.AddReference(imageID)
+	return r.UpdateDeduplicationInfo(ctx, info)
+}
+
+// RemoveHashReference removes an image reference from hash
+func (r *RedisRepository) RemoveHashReference(ctx context.Context, hash models.ImageHash, imageID string) error {
+	info, err := r.GetDeduplicationInfo(ctx, hash)
+	if err != nil {
+		return err
+	}
+
+	info.RemoveReference(imageID)
+
+	// If no more references, delete the deduplication info
+	if info.IsOrphaned() {
+		return r.DeleteDeduplicationInfo(ctx, hash)
+	}
+
+	return r.UpdateDeduplicationInfo(ctx, info)
+}
+
+// GetOrphanedHashes returns hashes with no image references
+func (r *RedisRepository) GetOrphanedHashes(ctx context.Context) ([]models.ImageHash, error) {
+	var orphanedHashes []models.ImageHash
+
+	// Get all deduplication keys
+	keys, err := r.client.Keys(ctx, "dedup:*").Result()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, key := range keys {
+		// Extract hash from key
+		if !strings.HasPrefix(key, "dedup:") {
+			continue
+		}
+
+		// Get the deduplication info
+		data, err := r.client.HGetAll(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		// Check if orphaned (no references or empty referencing_ids)
+		if countStr, ok := data["reference_count"]; ok {
+			if count, err := strconv.Atoi(countStr); err == nil && count == 0 {
+				hash := models.ImageHash{
+					Algorithm: data["hash_algorithm"],
+					Value:     data["hash_value"],
+				}
+				if sizeStr, ok := data["hash_size"]; ok {
+					if size, err := strconv.ParseInt(sizeStr, 10, 64); err == nil {
+						hash.Size = size
+					}
+				}
+				orphanedHashes = append(orphanedHashes, hash)
+			}
+		}
+	}
+
+	return orphanedHashes, nil
 }

@@ -223,7 +223,7 @@ func (p *ProcessorServiceImpl) decodeImage(data []byte) (image.Image, string, er
 	img, format, err := image.Decode(reader)
 	if err != nil {
 		// Try WebP specifically (not in standard library)
-		reader.Seek(0, 0)
+		_, _ = reader.Seek(0, 0)
 		if webpImg, webpErr := webp.Decode(reader); webpErr == nil {
 			return webpImg, "webp", nil
 		}
@@ -340,18 +340,4 @@ func (p *ProcessorServiceImpl) cropResize(src image.Image, targetWidth, targetHe
 	cropped := imaging.CropCenter(resized, targetWidth, targetHeight)
 
 	return cropped
-}
-
-// GetSupportedFormats returns list of supported image formats
-func (p *ProcessorServiceImpl) GetSupportedFormats() []string {
-	return []string{"image/jpeg", "image/png", "image/gif", "image/webp"}
-}
-
-// GetMaxDimension returns maximum allowed image dimension
-func (p *ProcessorServiceImpl) GetMaxDimension() int {
-	// Return the larger of the two as the overall max dimension
-	if p.maxWidth >= p.maxHeight {
-		return p.maxWidth
-	}
-	return p.maxHeight
 }

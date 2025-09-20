@@ -188,7 +188,15 @@ curl http://localhost:8080/api/v1/images/{id}/800x600 -o image_800x600.jpg
 
 # Download by alias
 curl http://localhost:8080/api/v1/images/{id}/small -o image_small.jpg
-```
+
+# Delete entire image (with deduplication cleanup)
+curl -X DELETE http://localhost:8080/api/v1/images/{id}
+
+# Delete specific resolution (with reference tracking)
+curl -X DELETE http://localhost:8080/api/v1/images/{id}/800x600
+
+# Delete resolution by alias
+curl -X DELETE http://localhost:8080/api/v1/images/{id}/small
 
 ---
 
@@ -207,10 +215,11 @@ https://your-domain.com/api/v1
 | `GET` | `/images/{id}/info` | Get image metadata | 50/min |
 | `GET` | `/images/{id}/original` | Download original image | 100/min |
 | `GET` | `/images/{id}/thumbnail` | Download thumbnail (150x150) | 100/min |
-
 | `GET` | `/images/{id}/{resolution}` | Download custom resolution or alias | 100/min |
 | `GET` | `/images/{id}/{resolution}/presigned-url` | Generate presigned URL for direct access | 50/min |
-| `GET` | `/health` | Health check | Unlimited |
+| `DELETE` | `/images/{id}` | Delete entire image with deduplication cleanup | 10/min |
+| `DELETE` | `/images/{id}/{resolution}` | Delete specific resolution with reference tracking | 10/min |
+| `GET` | `/health` | Health check with deduplication metrics | Unlimited |
 
 ### 🏷️ Resolution Aliases
 
@@ -260,7 +269,156 @@ curl http://localhost:8080/api/v1/images/{id}/800x600 -o small.jpg
 }
 ```
 
-### 🔐 Authentication
+### � Deduplication & Resolution Tracking
+
+RESIZR includes advanced **deduplication** functionality that optimizes storage by sharing identical image resolutions across multiple users while maintaining proper reference tracking per user.
+
+#### How Deduplication Works
+
+**Smart Resolution Sharing:**
+- When multiple users upload images with identical content and request the same resolutions, RESIZR automatically detects duplicates
+- Instead of storing multiple copies of the same processed image, it stores one physical file and tracks references per user
+- Each user maintains their own metadata and access permissions, but shares the underlying storage
+
+**Resolution Reference Tracking:**
+- Each resolution tracks how many users are referencing it
+- When a user deletes their image, only their reference is removed
+- The physical file is only deleted when the last user reference is removed
+- Prevents accidental deletion of shared resolutions used by other users
+
+#### Deduplication Process
+
+**Upload Flow with Deduplication:**
+```
+1. User uploads image with requested resolutions
+2. System calculates content hash of original image
+3. For each requested resolution:
+   ├── Check if identical resolution already exists
+   ├── If exists: Create reference to existing file
+   ├── If not: Process and store new resolution
+4. Store user-specific metadata with deduplication info
+5. Track resolution references per user
+```
+
+**Deletion Flow with Reference Tracking:**
+```
+1. User requests image deletion
+2. System decrements reference count for each resolution
+3. Remove user's metadata entry
+4. Delete physical files only when reference count reaches zero
+5. Clean up orphaned metadata and cache entries
+```
+
+#### Benefits
+
+- **Storage Efficiency**: Eliminates duplicate storage of identical image resolutions
+- **Cost Optimization**: Reduces S3 storage costs and data transfer fees
+- **Performance**: Faster uploads for duplicate content (no re-processing needed)
+- **User Isolation**: Each user maintains independent access to their images
+- **Data Integrity**: Proper cleanup prevents orphaned files and metadata
+
+#### Configuration
+
+Deduplication is **automatically enabled** and requires no additional configuration. The system works transparently with existing functionality.
+
+#### API Behavior
+
+**Upload (Automatic Deduplication):**
+```bash
+# First user uploads image
+curl -X POST http://localhost:8080/api/v1/images \
+  -F "image=@photo.jpg" \
+  -F "resolutions=800x600,1200x900"
+
+# Second user uploads identical image with same resolutions
+curl -X POST http://localhost:8080/api/v1/images \
+  -F "image=@photo.jpg" \
+  -F "resolutions=800x600,1200x900"
+
+# → Shares existing resolutions, no duplicate storage
+```
+
+**Delete (Reference Tracking):**
+
+```bash
+# User deletes their image
+curl -X DELETE http://localhost:8080/api/v1/images/{id}
+
+# → Only removes user's reference
+# → Physical files remain if other users reference them
+# → Files deleted only when last reference removed
+```
+
+#### Backward Compatibility
+
+- **Existing Images**: All existing images continue to work without modification
+- **API Compatibility**: No changes to existing API endpoints or request formats
+- **Migration**: Automatic migration of existing data to deduplication system
+- **Data Preservation**: All existing metadata and files are preserved
+
+#### Monitoring Deduplication
+
+Check deduplication status through the health endpoint:
+
+```bash
+curl http://localhost:8080/health
+```
+
+Response includes deduplication metrics:
+
+```json
+{
+  "status": "healthy",
+  "deduplication": {
+    "enabled": true,
+    "total_shared_resolutions": 1250,
+    "storage_saved_mb": 450.5,
+    "average_references_per_resolution": 2.3
+  }
+}
+```
+
+#### Storage Schema with Deduplication
+
+**Redis Keys (Enhanced):**
+
+```bash
+image:metadata:{uuid}           # Hash: Image metadata + deduplication info
+resolution:refs:{hash}:{res}    # Set: User UUIDs referencing this resolution
+resolution:data:{hash}:{res}    # Hash: Resolution metadata (dimensions, format, etc.)
+```
+
+**S3 Structure (Optimized):**
+
+```bash
+s3://bucket/
+└── images/
+    ├── shared/                  # Shared resolution storage
+    │   ├── abc123_800x600.jpg   # Shared resolution file
+    │   └── def456_1200x900.jpg  # Another shared resolution
+    └── users/                   # User-specific original images
+        └── {user_id}/
+            └── {uuid}/
+                └── original.jpg
+```
+
+**Metadata Structure:**
+
+```json
+{
+  "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "hash": "abc123def456",
+  "isDeduped": true,
+  "sharedImageId": "shared_abc123",
+  "resolutions": ["original", "thumbnail", "800x600", "1200x900"],
+  "deduplicationInfo": {
+    "sharedResolutions": ["800x600", "1200x900"],
+    "referenceCount": 3
+  }
+}
+```
+
+### �🔐 Authentication
 
 RESIZR supports optional API key-based authentication with two permission levels:
 

@@ -17,6 +17,42 @@ import (
 )
 
 // Local mocks to avoid interface mismatches
+
+// Mock deduplication repository
+type mockDeduplicationRepositoryForImageService struct{}
+
+func (m *mockDeduplicationRepositoryForImageService) StoreDeduplicationInfo(_ context.Context, _ *models.DeduplicationInfo) error {
+	return nil
+}
+
+func (m *mockDeduplicationRepositoryForImageService) GetDeduplicationInfo(_ context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+	return nil, models.NotFoundError{Resource: "deduplication_info", ID: hash.String()}
+}
+
+func (m *mockDeduplicationRepositoryForImageService) UpdateDeduplicationInfo(_ context.Context, _ *models.DeduplicationInfo) error {
+	return nil
+}
+
+func (m *mockDeduplicationRepositoryForImageService) DeleteDeduplicationInfo(_ context.Context, _ models.ImageHash) error {
+	return nil
+}
+
+func (m *mockDeduplicationRepositoryForImageService) FindImageByHash(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+	return m.GetDeduplicationInfo(ctx, hash)
+}
+
+func (m *mockDeduplicationRepositoryForImageService) AddHashReference(_ context.Context, _ models.ImageHash, _ string) error {
+	return nil
+}
+
+func (m *mockDeduplicationRepositoryForImageService) RemoveHashReference(_ context.Context, _ models.ImageHash, _ string) error {
+	return nil
+}
+
+func (m *mockDeduplicationRepositoryForImageService) GetOrphanedHashes(_ context.Context) ([]models.ImageHash, error) {
+	return []models.ImageHash{}, nil
+}
+
 type mockImageRepositoryForImageService struct {
 	saveFunc     func(ctx context.Context, metadata *models.ImageMetadata) error
 	getByIDFunc  func(ctx context.Context, id string) (*models.ImageMetadata, error)
@@ -104,7 +140,7 @@ func (m *mockImageRepositoryForImageService) GetStats(ctx context.Context) (*rep
 	return nil, nil
 }
 
-func (m *mockImageRepositoryForImageService) UpdateResolutions(ctx context.Context, imageID string, resolutions []string) error {
+func (m *mockImageRepositoryForImageService) UpdateResolutions(_ context.Context, _ string, _ []string) error {
 	return nil
 }
 
@@ -119,7 +155,17 @@ type mockStorageProviderForImageService struct {
 	copyObjectFunc           func(ctx context.Context, srcKey, destKey string) error
 	listObjectsFunc          func(ctx context.Context, prefix string, maxKeys int) ([]storage.ObjectInfo, error)
 	getURLFunc               func(key string) string
+	deleteFolderFunc         func(ctx context.Context, prefix string) error
 }
+
+func (m *mockStorageProviderForImageService) DeleteFolder(ctx context.Context, prefix string) error {
+	if m.deleteFolderFunc != nil {
+		return m.deleteFolderFunc(ctx, prefix)
+	}
+	return nil
+}
+
+// ...existing code...
 
 func (m *mockStorageProviderForImageService) Upload(ctx context.Context, key string, data io.Reader, size int64, contentType string) error {
 	if m.uploadFunc != nil {
@@ -236,7 +282,7 @@ func TestNewImageService(t *testing.T) {
 	mockProcessor := &mockProcessorServiceForImageService{}
 	cfg := testutil.TestConfig()
 
-	service := NewImageService(mockRepo, mockStorage, mockProcessor, cfg)
+	service := NewImageService(mockRepo, &mockDeduplicationRepositoryForImageService{}, mockStorage, mockProcessor, cfg)
 
 	assert.NotNil(t, service)
 
@@ -270,7 +316,7 @@ func TestImageService_ProcessUpload_Success(t *testing.T) {
 	}
 
 	cfg := testutil.TestConfig()
-	service := NewImageService(mockRepo, mockStorage, mockProcessor, cfg)
+	service := NewImageService(mockRepo, &mockDeduplicationRepositoryForImageService{}, mockStorage, mockProcessor, cfg)
 
 	input := UploadInput{
 		Filename:    "test.jpg",
@@ -293,7 +339,7 @@ func TestImageService_ProcessUpload_Success(t *testing.T) {
 }
 
 func TestImageService_ProcessUpload_ValidationError(t *testing.T) {
-	service := NewImageService(&mockImageRepositoryForImageService{}, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
+	service := NewImageService(&mockImageRepositoryForImageService{}, &mockDeduplicationRepositoryForImageService{}, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	tests := []struct {
 		name    string
@@ -358,7 +404,7 @@ func TestImageService_ProcessUpload_ProcessorError(t *testing.T) {
 		},
 	}
 
-	service := NewImageService(&mockImageRepositoryForImageService{}, &mockStorageProviderForImageService{}, mockProcessor, testutil.TestConfig())
+	service := NewImageService(&mockImageRepositoryForImageService{}, &mockDeduplicationRepositoryForImageService{}, &mockStorageProviderForImageService{}, mockProcessor, testutil.TestConfig())
 
 	input := UploadInput{
 		Filename: "test.jpg",
@@ -385,7 +431,7 @@ func TestImageService_ProcessUpload_StorageError(t *testing.T) {
 		},
 	}
 
-	service := NewImageService(&mockImageRepositoryForImageService{}, mockStorage, mockProcessor, testutil.TestConfig())
+	service := NewImageService(&mockImageRepositoryForImageService{}, &mockDeduplicationRepositoryForImageService{}, mockStorage, mockProcessor, testutil.TestConfig())
 
 	input := UploadInput{
 		Filename: "test.jpg",
@@ -408,7 +454,7 @@ func TestImageService_GetMetadata_Success(t *testing.T) {
 		},
 	}
 
-	service := NewImageService(mockRepo, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
+	service := NewImageService(mockRepo, &mockDeduplicationRepositoryForImageService{}, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	ctx := context.Background()
 	metadata, err := service.GetMetadata(ctx, testutil.ValidUUID)
@@ -418,7 +464,7 @@ func TestImageService_GetMetadata_Success(t *testing.T) {
 }
 
 func TestImageService_GetMetadata_InvalidUUID(t *testing.T) {
-	service := NewImageService(&mockImageRepositoryForImageService{}, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
+	service := NewImageService(&mockImageRepositoryForImageService{}, &mockDeduplicationRepositoryForImageService{}, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	ctx := context.Background()
 	_, err := service.GetMetadata(ctx, testutil.InvalidUUID)
@@ -435,7 +481,7 @@ func TestImageService_GetMetadata_NotFound(t *testing.T) {
 		},
 	}
 
-	service := NewImageService(mockRepo, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
+	service := NewImageService(mockRepo, &mockDeduplicationRepositoryForImageService{}, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	ctx := context.Background()
 	_, err := service.GetMetadata(ctx, testutil.ValidUUID)
@@ -459,7 +505,7 @@ func TestImageService_GetImageStream_Success(t *testing.T) {
 		},
 	}
 
-	service := NewImageService(mockRepo, mockStorage, &mockProcessorServiceForImageService{}, testutil.TestConfig())
+	service := NewImageService(mockRepo, &mockDeduplicationRepositoryForImageService{}, mockStorage, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	ctx := context.Background()
 	stream, metadata, err := service.GetImageStream(ctx, testutil.ValidUUID, "thumbnail")
@@ -473,7 +519,7 @@ func TestImageService_GetImageStream_Success(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, testData, data)
 
-	stream.Close()
+	assert.NoError(t, stream.Close())
 }
 
 func TestImageService_GetImageStream_ResolutionNotFound(t *testing.T) {
@@ -485,7 +531,7 @@ func TestImageService_GetImageStream_ResolutionNotFound(t *testing.T) {
 		},
 	}
 
-	service := NewImageService(mockRepo, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
+	service := NewImageService(mockRepo, &mockDeduplicationRepositoryForImageService{}, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	ctx := context.Background()
 	_, _, err := service.GetImageStream(ctx, testutil.ValidUUID, "nonexistent")
@@ -502,7 +548,7 @@ func TestImageService_GeneratePresignedURL_Success(t *testing.T) {
 		},
 	}
 
-	service := NewImageService(&mockImageRepositoryForImageService{}, mockStorage, &mockProcessorServiceForImageService{}, testutil.TestConfig())
+	service := NewImageService(&mockImageRepositoryForImageService{}, &mockDeduplicationRepositoryForImageService{}, mockStorage, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	ctx := context.Background()
 	storageKey := "images/test/thumbnail.jpg"
@@ -521,7 +567,7 @@ func TestImageService_GeneratePresignedURL_Error(t *testing.T) {
 		},
 	}
 
-	service := NewImageService(&mockImageRepositoryForImageService{}, mockStorage, &mockProcessorServiceForImageService{}, testutil.TestConfig())
+	service := NewImageService(&mockImageRepositoryForImageService{}, &mockDeduplicationRepositoryForImageService{}, mockStorage, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	ctx := context.Background()
 	_, err := service.GeneratePresignedURL(ctx, "test-key", time.Hour)
@@ -547,7 +593,7 @@ func TestImageService_DeleteImage_Success(t *testing.T) {
 		},
 	}
 
-	service := NewImageService(mockRepo, mockStorage, &mockProcessorServiceForImageService{}, testutil.TestConfig())
+	service := NewImageService(mockRepo, &mockDeduplicationRepositoryForImageService{}, mockStorage, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	ctx := context.Background()
 	err := service.DeleteImage(ctx, testutil.ValidUUID)
@@ -567,7 +613,7 @@ func TestImageService_ListImages_Success(t *testing.T) {
 		},
 	}
 
-	service := NewImageService(mockRepo, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
+	service := NewImageService(mockRepo, &mockDeduplicationRepositoryForImageService{}, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	ctx := context.Background()
 	images, total, err := service.ListImages(ctx, 0, 10)
@@ -586,7 +632,7 @@ func TestImageService_ListImages_LimitValidation(t *testing.T) {
 		},
 	}
 
-	service := NewImageService(mockRepo, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
+	service := NewImageService(mockRepo, &mockDeduplicationRepositoryForImageService{}, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	ctx := context.Background()
 
@@ -696,7 +742,7 @@ func TestImageService_ProcessResolution_Success(t *testing.T) {
 		},
 	}
 
-	service := NewImageService(mockRepo, mockStorage, mockProcessor, testutil.TestConfig())
+	service := NewImageService(mockRepo, &mockDeduplicationRepositoryForImageService{}, mockStorage, mockProcessor, testutil.TestConfig())
 
 	ctx := context.Background()
 	err := service.ProcessResolution(ctx, testutil.ValidUUID, "1024x768")
@@ -715,7 +761,7 @@ func TestImageService_ProcessResolution_AlreadyExists(t *testing.T) {
 		},
 	}
 
-	service := NewImageService(mockRepo, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
+	service := NewImageService(mockRepo, &mockDeduplicationRepositoryForImageService{}, &mockStorageProviderForImageService{}, &mockProcessorServiceForImageService{}, testutil.TestConfig())
 
 	ctx := context.Background()
 	err := service.ProcessResolution(ctx, testutil.ValidUUID, "1024x768")

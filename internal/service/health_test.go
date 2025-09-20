@@ -23,24 +23,26 @@ type mockImageRepository struct {
 	getStatsFunc func(ctx context.Context) (*repository.RepositoryStats, error)
 }
 
-func (m *mockImageRepository) Save(ctx context.Context, metadata *models.ImageMetadata) error {
+func (m *mockImageRepository) Save(_ctx context.Context, _metadata *models.ImageMetadata) error {
 	return nil
 }
-func (m *mockImageRepository) GetByID(ctx context.Context, id string) (*models.ImageMetadata, error) {
+func (m *mockImageRepository) GetByID(_ctx context.Context, _id string) (*models.ImageMetadata, error) {
 	return nil, nil
 }
-func (m *mockImageRepository) Get(ctx context.Context, id string) (*models.ImageMetadata, error) {
+func (m *mockImageRepository) Get(_ctx context.Context, _id string) (*models.ImageMetadata, error) {
 	return nil, nil
 }
-func (m *mockImageRepository) Store(ctx context.Context, metadata *models.ImageMetadata) error {
+func (m *mockImageRepository) Store(_ctx context.Context, _metadata *models.ImageMetadata) error {
 	return nil
 }
-func (m *mockImageRepository) Update(ctx context.Context, metadata *models.ImageMetadata) error {
+func (m *mockImageRepository) Update(_ctx context.Context, _metadata *models.ImageMetadata) error {
 	return nil
 }
-func (m *mockImageRepository) Delete(ctx context.Context, id string) error         { return nil }
-func (m *mockImageRepository) Exists(ctx context.Context, id string) (bool, error) { return false, nil }
-func (m *mockImageRepository) List(ctx context.Context, offset, limit int) ([]*models.ImageMetadata, error) {
+func (m *mockImageRepository) Delete(_ctx context.Context, _id string) error { return nil }
+func (m *mockImageRepository) Exists(_ctx context.Context, _id string) (bool, error) {
+	return false, nil
+}
+func (m *mockImageRepository) List(_ctx context.Context, _offset, _limit int) ([]*models.ImageMetadata, error) {
 	return nil, nil
 }
 func (m *mockImageRepository) HealthCheck(ctx context.Context) error {
@@ -66,21 +68,71 @@ func (m *mockImageRepository) UpdateResolutions(ctx context.Context, imageID str
 	return nil
 }
 
+// Deduplication methods
+func (m *mockImageRepository) StoreDeduplicationInfo(ctx context.Context, info *models.DeduplicationInfo) error {
+	return nil
+}
+func (m *mockImageRepository) GetDeduplicationInfo(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+	return nil, nil
+}
+func (m *mockImageRepository) UpdateDeduplicationInfo(ctx context.Context, info *models.DeduplicationInfo) error {
+	return nil
+}
+func (m *mockImageRepository) DeleteDeduplicationInfo(ctx context.Context, hash models.ImageHash) error {
+	return nil
+}
+func (m *mockImageRepository) FindImageByHash(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+	return nil, nil
+}
+func (m *mockImageRepository) AddHashReference(ctx context.Context, hash models.ImageHash, imageID string) error {
+	return nil
+}
+func (m *mockImageRepository) RemoveHashReference(ctx context.Context, hash models.ImageHash, imageID string) error {
+	return nil
+}
+func (m *mockImageRepository) GetOrphanedHashes(ctx context.Context) ([]models.ImageHash, error) {
+	return nil, nil
+}
+
+// Cache methods
+func (m *mockImageRepository) SetCachedURL(ctx context.Context, imageID, resolution, url string, ttl time.Duration) error {
+	return nil
+}
+func (m *mockImageRepository) GetCachedURL(ctx context.Context, imageID, resolution string) (string, error) {
+	return "", nil
+}
+func (m *mockImageRepository) DeleteCachedURL(ctx context.Context, imageID, resolution string) error {
+	return nil
+}
+func (m *mockImageRepository) DeleteAllCachedURLs(ctx context.Context, imageID string) error {
+	return nil
+}
+func (m *mockImageRepository) SetCache(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+	return nil
+}
+func (m *mockImageRepository) GetCache(ctx context.Context, key string) (string, error) {
+	return "", nil
+}
+func (m *mockImageRepository) DeleteCache(ctx context.Context, key string) error {
+	return nil
+}
+
 type mockStorageProvider struct {
 	healthFunc func(ctx context.Context) error
 }
 
-func (m *mockStorageProvider) Upload(ctx context.Context, key string, data io.Reader, size int64, contentType string) error {
+func (m *mockStorageProvider) Upload(_ctx context.Context, _key string, _data io.Reader, _size int64, _contentType string) error {
 	return nil
 }
-func (m *mockStorageProvider) Download(ctx context.Context, key string) (io.ReadCloser, error) {
+func (m *mockStorageProvider) Download(_ctx context.Context, _key string) (io.ReadCloser, error) {
 	return nil, nil
 }
-func (m *mockStorageProvider) Delete(ctx context.Context, key string) error { return nil }
-func (m *mockStorageProvider) Exists(ctx context.Context, key string) (bool, error) {
+func (m *mockStorageProvider) Delete(_ctx context.Context, _key string) error          { return nil }
+func (m *mockStorageProvider) DeleteFolder(_ctx context.Context, _prefix string) error { return nil }
+func (m *mockStorageProvider) Exists(_ctx context.Context, _key string) (bool, error) {
 	return false, nil
 }
-func (m *mockStorageProvider) GeneratePresignedURL(ctx context.Context, key string, expiration time.Duration) (string, error) {
+func (m *mockStorageProvider) GeneratePresignedURL(_ctx context.Context, _key string, _expiration time.Duration) (string, error) {
 	return "", nil
 }
 func (m *mockStorageProvider) HealthCheck(ctx context.Context) error {
@@ -90,16 +142,16 @@ func (m *mockStorageProvider) HealthCheck(ctx context.Context) error {
 	return nil
 }
 func (m *mockStorageProvider) Health(ctx context.Context) error { return m.HealthCheck(ctx) }
-func (m *mockStorageProvider) CopyObject(ctx context.Context, srcKey, destKey string) error {
+func (m *mockStorageProvider) CopyObject(_ctx context.Context, _srcKey, _destKey string) error {
 	return nil
 }
-func (m *mockStorageProvider) GetMetadata(ctx context.Context, key string) (*storage.FileMetadata, error) {
+func (m *mockStorageProvider) GetMetadata(_ctx context.Context, _key string) (*storage.FileMetadata, error) {
 	return nil, nil
 }
-func (m *mockStorageProvider) ListObjects(ctx context.Context, prefix string, maxKeys int) ([]storage.ObjectInfo, error) {
+func (m *mockStorageProvider) ListObjects(_ctx context.Context, _prefix string, _maxKeys int) ([]storage.ObjectInfo, error) {
 	return nil, nil
 }
-func (m *mockStorageProvider) GetURL(key string) string {
+func (m *mockStorageProvider) GetURL(_key string) string {
 	return ""
 }
 
@@ -455,12 +507,12 @@ func TestHealthService_Version(t *testing.T) {
 }
 
 // MockImageRepository extension to add GetStats
-type MockImageRepositoryWithStats struct {
+type _MockImageRepositoryWithStats struct {
 	*mockImageRepository
 	GetStatsFunc func(ctx context.Context) (*RepositoryStats, error)
 }
 
-func (m *MockImageRepositoryWithStats) GetStats(ctx context.Context) (*RepositoryStats, error) {
+func (m *_MockImageRepositoryWithStats) GetStats(ctx context.Context) (*RepositoryStats, error) {
 	if m.GetStatsFunc != nil {
 		return m.GetStatsFunc(ctx)
 	}

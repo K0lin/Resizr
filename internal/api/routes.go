@@ -101,8 +101,9 @@ func (r *Router) setupRoutes() {
 			images.GET("/:id/thumbnail/presigned-url", middleware.RequirePermission(middleware.PermissionRead), r.imageHandler.GeneratePresignedURL)
 			images.GET("/:id/:resolution/presigned-url", middleware.RequirePermission(middleware.PermissionRead), r.imageHandler.GeneratePresignedURL)
 
-			// Future: Delete image (require read-write permission)
-			// images.DELETE("/:id", middleware.RequirePermission(middleware.PermissionReadWrite), r.imageHandler.Delete)
+			// Delete operations (require read-write permission)
+			images.DELETE("/:id", middleware.RequirePermission(middleware.PermissionReadWrite), r.imageHandler.Delete)
+			images.DELETE("/:id/:resolution", middleware.RequirePermission(middleware.PermissionReadWrite), r.imageHandler.DeleteResolution)
 		}
 	}
 

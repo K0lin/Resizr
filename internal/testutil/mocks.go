@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"resizr/internal/models"
+	"resizr/internal/repository"
+	"resizr/internal/service"
+	"resizr/internal/storage"
 )
 
 // ServiceUploadInput represents input for image upload (matches service.UploadInput)
@@ -24,11 +27,7 @@ type ServiceUploadResult struct {
 	ProcessedSizes       map[string]int64 `json:"processed_sizes"`
 }
 
-// UploadInput represents input for image upload (deprecated, use ServiceUploadInput)
-type UploadInput = ServiceUploadInput
-
-// UploadResult represents the result of image upload (deprecated, use ServiceUploadResult)
-type UploadResult = ServiceUploadResult
+// ...existing code...
 
 // HealthStatus represents health check status - duplicated to avoid import cycles
 type HealthStatus struct {
@@ -137,7 +136,7 @@ type MockImageRepository struct {
 	ListFunc        func(ctx context.Context, offset, limit int) ([]*models.ImageMetadata, error)
 	HealthFunc      func(ctx context.Context) error
 	CloseFunc       func() error
-	GetStatsFunc    func(ctx context.Context) (interface{}, error)
+	GetStatsFunc    func(ctx context.Context) (*repository.RepositoryStats, error)
 }
 
 func (m *MockImageRepository) Save(ctx context.Context, metadata *models.ImageMetadata) error {
@@ -223,11 +222,16 @@ func (m *MockImageRepository) Close() error {
 	return nil
 }
 
-func (m *MockImageRepository) GetStats(ctx context.Context) (interface{}, error) {
+func (m *MockImageRepository) GetStats(ctx context.Context) (*repository.RepositoryStats, error) {
 	if m.GetStatsFunc != nil {
 		return m.GetStatsFunc(ctx)
 	}
 	return nil, nil
+}
+
+func (m *MockImageRepository) UpdateResolutions(ctx context.Context, id string, resolutions []string) error {
+	// Simple implementation for mock
+	return nil
 }
 
 // MockStorageProvider is a mock implementation of StorageProvider
@@ -239,11 +243,11 @@ type MockStorageProvider struct {
 	GeneratePresignedURLFunc func(ctx context.Context, key string, expiration time.Duration) (string, error)
 	HealthCheckFunc          func(ctx context.Context) error
 	HealthFunc               func(ctx context.Context) error
-	GetMetadataFunc          func(ctx context.Context, key string) (*models.ImageMetadata, error)
+	GetMetadataFunc          func(ctx context.Context, key string) (*storage.FileMetadata, error)
 	CopyObjectFunc           func(ctx context.Context, srcKey, destKey string) error
 }
 
-func (m *MockStorageProvider) Upload(ctx context.Context, key string, data io.Reader, size int64, contentType string) error {
+func (m *MockStorageProvider) Upload(ctx context.Context, key string, data io.Reader, _size int64, contentType string) error {
 	if m.UploadFunc != nil {
 		return m.UploadFunc(ctx, key, data, contentType)
 	}
@@ -292,7 +296,7 @@ func (m *MockStorageProvider) Health(ctx context.Context) error {
 	return m.HealthCheck(ctx)
 }
 
-func (m *MockStorageProvider) GetMetadata(ctx context.Context, key string) (*models.ImageMetadata, error) {
+func (m *MockStorageProvider) GetMetadata(ctx context.Context, key string) (*storage.FileMetadata, error) {
 	if m.GetMetadataFunc != nil {
 		return m.GetMetadataFunc(ctx, key)
 	}
@@ -306,15 +310,30 @@ func (m *MockStorageProvider) CopyObject(ctx context.Context, srcKey, destKey st
 	return nil
 }
 
+func (m *MockStorageProvider) DeleteFolder(ctx context.Context, prefix string) error {
+	// Simple implementation for mock
+	return nil
+}
+
+func (m *MockStorageProvider) ListObjects(ctx context.Context, prefix string, maxKeys int) ([]storage.ObjectInfo, error) {
+	// Simple implementation for mock
+	return []storage.ObjectInfo{}, nil
+}
+
+func (m *MockStorageProvider) GetURL(key string) string {
+	// Simple implementation for mock
+	return "http://mock-url/" + key
+}
+
 // MockProcessorService is a mock implementation of ProcessorService
 type MockProcessorService struct {
-	ProcessImageFunc  func(data []byte, config interface{}) ([]byte, error)
+	ProcessImageFunc  func(data []byte, config service.ResizeConfig) ([]byte, error)
 	ValidateImageFunc func(data []byte, maxSize int64) error
 	DetectFormatFunc  func(data []byte) (string, error)
 	GetDimensionsFunc func(data []byte) (width, height int, err error)
 }
 
-func (m *MockProcessorService) ProcessImage(data []byte, config interface{}) ([]byte, error) {
+func (m *MockProcessorService) ProcessImage(data []byte, config service.ResizeConfig) ([]byte, error) {
 	if m.ProcessImageFunc != nil {
 		return m.ProcessImageFunc(data, config)
 	}
@@ -340,4 +359,72 @@ func (m *MockProcessorService) GetDimensions(data []byte) (width, height int, er
 		return m.GetDimensionsFunc(data)
 	}
 	return 1920, 1080, nil
+}
+
+// MockDeduplicationRepository is a mock implementation of DeduplicationRepository
+type MockDeduplicationRepository struct {
+	StoreDeduplicationInfoFunc  func(ctx context.Context, info *models.DeduplicationInfo) error
+	GetDeduplicationInfoFunc    func(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error)
+	UpdateDeduplicationInfoFunc func(ctx context.Context, info *models.DeduplicationInfo) error
+	DeleteDeduplicationInfoFunc func(ctx context.Context, hash models.ImageHash) error
+	FindImageByHashFunc         func(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error)
+	AddHashReferenceFunc        func(ctx context.Context, hash models.ImageHash, imageID string) error
+	RemoveHashReferenceFunc     func(ctx context.Context, hash models.ImageHash, imageID string) error
+	GetOrphanedHashesFunc       func(ctx context.Context) ([]models.ImageHash, error)
+}
+
+func (m *MockDeduplicationRepository) StoreDeduplicationInfo(ctx context.Context, info *models.DeduplicationInfo) error {
+	if m.StoreDeduplicationInfoFunc != nil {
+		return m.StoreDeduplicationInfoFunc(ctx, info)
+	}
+	return nil
+}
+
+func (m *MockDeduplicationRepository) GetDeduplicationInfo(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+	if m.GetDeduplicationInfoFunc != nil {
+		return m.GetDeduplicationInfoFunc(ctx, hash)
+	}
+	return nil, nil
+}
+
+func (m *MockDeduplicationRepository) UpdateDeduplicationInfo(ctx context.Context, info *models.DeduplicationInfo) error {
+	if m.UpdateDeduplicationInfoFunc != nil {
+		return m.UpdateDeduplicationInfoFunc(ctx, info)
+	}
+	return nil
+}
+
+func (m *MockDeduplicationRepository) DeleteDeduplicationInfo(ctx context.Context, hash models.ImageHash) error {
+	if m.DeleteDeduplicationInfoFunc != nil {
+		return m.DeleteDeduplicationInfoFunc(ctx, hash)
+	}
+	return nil
+}
+
+func (m *MockDeduplicationRepository) FindImageByHash(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+	if m.FindImageByHashFunc != nil {
+		return m.FindImageByHashFunc(ctx, hash)
+	}
+	return m.GetDeduplicationInfo(ctx, hash)
+}
+
+func (m *MockDeduplicationRepository) AddHashReference(ctx context.Context, hash models.ImageHash, imageID string) error {
+	if m.AddHashReferenceFunc != nil {
+		return m.AddHashReferenceFunc(ctx, hash, imageID)
+	}
+	return nil
+}
+
+func (m *MockDeduplicationRepository) RemoveHashReference(ctx context.Context, hash models.ImageHash, imageID string) error {
+	if m.RemoveHashReferenceFunc != nil {
+		return m.RemoveHashReferenceFunc(ctx, hash, imageID)
+	}
+	return nil
+}
+
+func (m *MockDeduplicationRepository) GetOrphanedHashes(ctx context.Context) ([]models.ImageHash, error) {
+	if m.GetOrphanedHashesFunc != nil {
+		return m.GetOrphanedHashesFunc(ctx)
+	}
+	return []models.ImageHash{}, nil
 }
