@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -133,6 +134,88 @@ func TestS3Storage_DeleteFolder_EdgeCases(t *testing.T) {
 			assert.NotPanics(t, func() {
 				_ = storage.DeleteFolder(ctx, prefix)
 			}, "Should handle special characters in prefix: %s", prefix)
+		}
+	})
+}
+
+func TestS3Storage_GetURL(t *testing.T) {
+	cfg := &config.S3Config{
+		Endpoint:  "http://localhost:9000",
+		Bucket:    "test-bucket",
+		Region:    "us-east-1",
+		AccessKey: "minioadmin",
+		SecretKey: "minioadmin",
+		UseSSL:    false,
+	}
+
+	storage, err := NewS3Storage(cfg)
+	if err != nil {
+		t.Skip("S3 storage not available for testing")
+	}
+
+	t.Run("generate_url", func(t *testing.T) {
+		key := "images/test-image.jpg"
+		url := storage.GetURL(key)
+
+		assert.NotEmpty(t, url)
+		assert.Contains(t, url, key)
+		assert.Contains(t, url, "test-bucket")
+	})
+
+	t.Run("empty_key", func(t *testing.T) {
+		url := storage.GetURL("")
+		assert.NotEmpty(t, url)
+	})
+}
+
+func TestS3Storage_ConfigValidation(t *testing.T) {
+	t.Run("missing_required_fields", func(t *testing.T) {
+		invalidConfigs := []*config.S3Config{
+			{
+				// Missing bucket
+				Region:    "us-east-1",
+				AccessKey: "key",
+				SecretKey: "secret",
+			},
+			{
+				// Missing access key
+				Bucket:    "test-bucket",
+				Region:    "us-east-1",
+				SecretKey: "secret",
+			},
+			{
+				// Missing secret key
+				Bucket:    "test-bucket",
+				Region:    "us-east-1",
+				AccessKey: "key",
+			},
+		}
+
+		for i, cfg := range invalidConfigs {
+			t.Run(fmt.Sprintf("invalid_config_%d", i), func(t *testing.T) {
+				_, err := NewS3Storage(cfg)
+				assert.Error(t, err)
+			})
+		}
+	})
+
+	t.Run("valid_minimal_config", func(t *testing.T) {
+		cfg := &config.S3Config{
+			Bucket:    "test-bucket",
+			Region:    "us-east-1",
+			AccessKey: "minioadmin",
+			SecretKey: "minioadmin",
+		}
+
+		storage, err := NewS3Storage(cfg)
+		// This might fail due to connection, but shouldn't fail due to config validation
+		if err != nil {
+			// Only skip if it's a connection error, not a validation error
+			assert.NotContains(t, err.Error(), "bucket")
+			assert.NotContains(t, err.Error(), "access")
+			assert.NotContains(t, err.Error(), "secret")
+		} else {
+			assert.NotNil(t, storage)
 		}
 	})
 }
