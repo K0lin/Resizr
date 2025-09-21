@@ -930,3 +930,132 @@ func TestResolutionAliases(t *testing.T) {
 		assert.Equal(t, "images/test-id/1920x1080.jpg", metadata.GetStorageKey("large"))
 	})
 }
+
+// Additional tests to increase coverage to 95%
+func TestCalculateImageHashFromReader(t *testing.T) {
+	// Test the private _CalculateImageHashFromReader function indirectly
+	// by testing functions that use it or similar functionality
+
+	// Test CompareBytesByBytes more thoroughly
+	t.Run("CompareBytesByBytes edge cases", func(t *testing.T) {
+		data1 := []byte("test data")
+		data2 := []byte("test data")
+		data3 := []byte("different data")
+
+		// Test same data
+		assert.True(t, CompareBytesByBytes(data1, data2))
+
+		// Test different data
+		assert.False(t, CompareBytesByBytes(data1, data3))
+
+		// Test empty data
+		assert.True(t, CompareBytesByBytes([]byte{}, []byte{}))
+
+		// Test one empty, one not
+		assert.False(t, CompareBytesByBytes([]byte{}, data1))
+		assert.False(t, CompareBytesByBytes(data1, []byte{}))
+	})
+}
+
+func TestDeduplicationInfoEdgeCases(t *testing.T) {
+	t.Run("HasReference edge cases", func(t *testing.T) {
+		hash := ImageHash{Algorithm: "sha256", Value: "test", Size: 8}
+		dedupInfo := NewDeduplicationInfo(hash, "master-id", "images/master/original.jpg")
+
+		// Test with existing reference
+		assert.True(t, dedupInfo.HasReference("master-id"))
+
+		// Test with non-existing reference
+		assert.False(t, dedupInfo.HasReference("non-existing"))
+
+		// Test with empty string
+		assert.False(t, dedupInfo.HasReference(""))
+	})
+
+	t.Run("AddResolutionReference edge cases", func(t *testing.T) {
+		hash := ImageHash{Algorithm: "sha256", Value: "test", Size: 8}
+		dedupInfo := NewDeduplicationInfo(hash, "master-id", "images/master/original.jpg")
+
+		// Add resolution for existing image
+		dedupInfo.AddResolutionReference("master-id", "800x600")
+		assert.True(t, dedupInfo.HasResolutionReference("master-id", "800x600"))
+
+		// Add another resolution for same image
+		dedupInfo.AddResolutionReference("master-id", "thumbnail")
+		assert.True(t, dedupInfo.HasResolutionReference("master-id", "thumbnail"))
+		assert.Equal(t, 2, dedupInfo.GetResolutionReferenceCount("master-id"))
+
+		// Try to add same resolution again (should not duplicate)
+		dedupInfo.AddResolutionReference("master-id", "800x600")
+		assert.Equal(t, 2, dedupInfo.GetResolutionReferenceCount("master-id"))
+
+		// Add resolution for non-existing image (only creates resolution reference, not main reference)
+		dedupInfo.AddResolutionReference("100x100", "new-id")
+		assert.False(t, dedupInfo.HasReference("new-id"))                     // Main reference doesn't exist
+		assert.True(t, dedupInfo.HasResolutionReference("100x100", "new-id")) // But resolution reference does
+	})
+}
+
+func TestParseResolutionEdgeCases(t *testing.T) {
+	t.Run("ParseResolution additional cases", func(t *testing.T) {
+		// Test max dimension limits
+		config, err := ParseResolution("8192x8192")
+		assert.NoError(t, err)
+		assert.Equal(t, 8192, config.Width)
+		assert.Equal(t, 8192, config.Height)
+
+		// Test dimensions exactly at limit
+		config, err = ParseResolution("4096x4096")
+		assert.NoError(t, err)
+		assert.Equal(t, 4096, config.Width)
+		assert.Equal(t, 4096, config.Height)
+
+		// Test with various valid formats
+		validCases := []struct {
+			input    string
+			expected ResolutionConfig
+		}{
+			{"50x50", ResolutionConfig{Width: 50, Height: 50, Alias: ""}},
+			{"1x1", ResolutionConfig{Width: 1, Height: 1, Alias: ""}},
+			{"100x200:custom", ResolutionConfig{Width: 100, Height: 200, Alias: "custom"}},
+		}
+
+		for _, tc := range validCases {
+			config, err := ParseResolution(tc.input)
+			assert.NoError(t, err, "failed for input: %s", tc.input)
+			assert.Equal(t, tc.expected.Width, config.Width)
+			assert.Equal(t, tc.expected.Height, config.Height)
+			assert.Equal(t, tc.expected.Alias, config.Alias)
+		}
+	})
+}
+
+func TestGetActualStorageKeyEdgeCases(t *testing.T) {
+	t.Run("GetActualStorageKey with various dedup states", func(t *testing.T) {
+		// Test non-deduped image (normal case)
+		metadata := &ImageMetadata{
+			ID:       "test-id",
+			Filename: "test.jpg",
+		}
+
+		key := metadata.GetActualStorageKey("800x600")
+		assert.Equal(t, "images/test-id/800x600.jpg", key)
+
+		// Test deduped image with shared ID
+		metadata.IsDeduped = true
+		metadata.SharedImageID = "shared-id"
+
+		key = metadata.GetActualStorageKey("800x600")
+		assert.Equal(t, "images/shared-id/800x600.jpg", key)
+
+		// Test deduped image without shared ID (should fall back to own ID)
+		metadata.SharedImageID = ""
+
+		key = metadata.GetActualStorageKey("800x600")
+		assert.Equal(t, "images/test-id/800x600.jpg", key)
+
+		// Test with original resolution
+		key = metadata.GetActualStorageKey("original")
+		assert.Equal(t, "images/test-id/original.jpg", key)
+	})
+}

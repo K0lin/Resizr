@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -12,8 +13,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// skipIfRedisUnavailable skips the test if Redis is not available
+func skipIfRedisUnavailable(t *testing.T) {
+	// Skip if running in CI environment
+	if os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Skip("Skipping Redis tests in CI environment")
+	}
+
+	// Try a quick connection test
+	testConfig := &config.RedisConfig{
+		URL:      "redis://localhost:6379/1",
+		Password: "",
+		DB:       1,
+		PoolSize: 1,
+		Timeout:  1000, // Short timeout for availability check
+	}
+
+	repo, err := NewRedisRepository(testConfig)
+	if err != nil {
+		t.Skipf("Skipping Redis tests: Redis unavailable (%v)", err)
+	}
+	_ = repo.Close()
+}
+
 // NewTestRedisRepository creates a Redis repository for testing
 func NewTestRedisRepository(t *testing.T) ImageRepository {
+	skipIfRedisUnavailable(t)
+
 	// Use a test Redis configuration
 	testConfig := &config.RedisConfig{
 		URL:      "redis://localhost:6379/1", // Use DB 1 for tests

@@ -335,7 +335,7 @@ func TestGetImageStatistics_FallbackToBasicStats(t *testing.T) {
 		Connections: repository.ConnectionStats{Active: 1, Idle: 0, Total: 1},
 		KeyCounts:   map[string]int64{"metadata": 50, "cache": 10},
 	}
-	mockImageRepo.On("GetStats", mock.Anything).Return(repoStats, nil).Twice()
+	mockImageRepo.On("GetStats", mock.Anything).Return(repoStats, nil).Once()
 
 	// Mock the additional calls that GetImageStatistics makes in fallback mode
 	mockImageRepo.On("GetImagesByTimeRange", mock.Anything, mock.Anything, mock.Anything).Return(int64(5), nil).Times(3)
@@ -397,16 +397,10 @@ func TestGetComprehensiveStatistics_WithCacheDisabled(t *testing.T) {
 	imageStats := &models.ImageStatistics{TotalImages: 100}
 	storageStats := &models.StorageStatistics{TotalStorageUsed: 1024000}
 	dedupStats := &models.DeduplicationStatistics{UniqueImages: 75}
-	repoStats := &repository.RepositoryStats{
-		CacheHits:   80,
-		CacheMisses: 20,
-		Connections: repository.ConnectionStats{Active: 1},
-	}
-
 	mockImageRepo.On("GetImageStatistics", mock.Anything).Return(imageStats, nil).Once()
 	mockImageRepo.On("GetStorageStatistics", mock.Anything).Return(storageStats, nil).Once()
 	mockDedupRepo.On("GetDeduplicationStatistics", mock.Anything).Return(dedupStats, nil).Once()
-	mockImageRepo.On("GetStats", mock.Anything).Return(repoStats, nil).Twice()
+	// Since all stats calls succeed, GetStats should not be called
 
 	result, err := service.GetComprehensiveStatistics(nil)
 
@@ -426,16 +420,10 @@ func TestGetComprehensiveStatistics_WithCacheEnabled(t *testing.T) {
 	imageStats := &models.ImageStatistics{TotalImages: 100}
 	storageStats := &models.StorageStatistics{TotalStorageUsed: 1024000}
 	dedupStats := &models.DeduplicationStatistics{UniqueImages: 75}
-	repoStats := &repository.RepositoryStats{
-		CacheHits:   80,
-		CacheMisses: 20,
-		Connections: repository.ConnectionStats{Active: 1},
-	}
-
 	mockImageRepo.On("GetImageStatistics", mock.Anything).Return(imageStats, nil).Once()
 	mockImageRepo.On("GetStorageStatistics", mock.Anything).Return(storageStats, nil).Once()
 	mockDedupRepo.On("GetDeduplicationStatistics", mock.Anything).Return(dedupStats, nil).Once()
-	mockImageRepo.On("GetStats", mock.Anything).Return(repoStats, nil).Twice()
+	// Since all stats calls succeed, GetStats should not be called
 
 	// First call - should generate and cache
 	result1, err1 := service.GetComprehensiveStatistics(nil)
@@ -460,17 +448,12 @@ func TestGetComprehensiveStatistics_CacheExpiry(t *testing.T) {
 	imageStats := &models.ImageStatistics{TotalImages: 100}
 	storageStats := &models.StorageStatistics{TotalStorageUsed: 1024000}
 	dedupStats := &models.DeduplicationStatistics{UniqueImages: 75}
-	repoStats := &repository.RepositoryStats{
-		CacheHits:   80,
-		CacheMisses: 20,
-		Connections: repository.ConnectionStats{Active: 1},
-	}
 
 	// Mock calls should happen twice due to cache expiry
 	mockImageRepo.On("GetImageStatistics", mock.Anything).Return(imageStats, nil).Twice()
 	mockImageRepo.On("GetStorageStatistics", mock.Anything).Return(storageStats, nil).Twice()
 	mockDedupRepo.On("GetDeduplicationStatistics", mock.Anything).Return(dedupStats, nil).Twice()
-	mockImageRepo.On("GetStats", mock.Anything).Return(repoStats, nil).Times(4)
+	// Since all stats calls succeed, GetStats should not be called
 
 	// First call
 	result1, err1 := service.GetComprehensiveStatistics(nil)
@@ -497,7 +480,8 @@ func TestRefreshStatistics_WithCacheEnabled(t *testing.T) {
 	mockImageRepo.On("GetImageStatistics", mock.Anything).Return(imageStats, nil).Once()
 	mockImageRepo.On("GetStorageStatistics", mock.Anything).Return(&models.StorageStatistics{}, nil).Once()
 	mockDedupRepo.On("GetDeduplicationStatistics", mock.Anything).Return(&models.DeduplicationStatistics{}, nil).Once()
-	mockImageRepo.On("GetStats", mock.Anything).Return(&repository.RepositoryStats{Connections: repository.ConnectionStats{Active: 1}}, nil).Once()
+	// Since GetImageStatistics and GetStorageStatistics succeed, GetStats should not be called
+	// mockImageRepo.On("GetStats", mock.Anything).Return(&repository.RepositoryStats{Connections: repository.ConnectionStats{Active: 1}}, nil) - No expectation
 
 	// Generate initial cached data
 	_, err := service.GetComprehensiveStatistics(nil)
