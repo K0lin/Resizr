@@ -166,8 +166,12 @@ func (p *ProcessorServiceImpl) ProcessImage(data []byte, config ResizeConfig) ([
 		resizedImage = p.smartFitResize(srcImage, config.Width, config.Height, backgroundColor)
 	}
 
-	// Encode the processed image
-	processedData, err := p.encodeImage(resizedImage, format, config.Quality)
+	// Encode the processed image using the specified output format
+	outputFormat := config.Format
+	if outputFormat == "" {
+		outputFormat = format // Fall back to input format if not specified
+	}
+	processedData, err := p.encodeImage(resizedImage, outputFormat, config.Quality)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode processed image: %w", err)
 	}
@@ -175,7 +179,8 @@ func (p *ProcessorServiceImpl) ProcessImage(data []byte, config ResizeConfig) ([
 	logger.Debug("Image processing completed",
 		zap.Int("original_size", len(data)),
 		zap.Int("processed_size", len(processedData)),
-		zap.String("format", format))
+		zap.String("input_format", format),
+		zap.String("output_format", outputFormat))
 
 	return processedData, nil
 }
@@ -261,11 +266,7 @@ func (p *ProcessorServiceImpl) encodeImage(img image.Image, format string, quali
 			return nil, err
 		}
 	default:
-		// Default to JPEG
-		options := &jpeg.Options{Quality: quality}
-		if err := jpeg.Encode(&buf, img, options); err != nil {
-			return nil, err
-		}
+		return nil, fmt.Errorf("unsupported output format: %s", format)
 	}
 
 	return buf.Bytes(), nil
