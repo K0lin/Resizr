@@ -51,8 +51,14 @@ func (s *ImageServiceImpl) ProcessUpload(ctx context.Context, input UploadInput)
 		zap.Int64("size", input.Size),
 		zap.Strings("requested_resolutions", input.Resolutions))
 
-	// Generate unique ID for the image
-	imageID := uuid.New().String()
+	// Generate unique ID for the image with collision detection
+	imageID, err := s.generateUniqueImageID(ctx)
+	if err != nil {
+		return nil, models.ProcessingError{
+			Operation: "uuid_generation",
+			Reason:    err.Error(),
+		}
+	}
 
 	// Validate input
 	if err := s.validateUploadInput(input); err != nil {
@@ -963,6 +969,49 @@ func (s *ImageServiceImpl) GeneratePresignedURL(ctx context.Context, storageKey 
 }
 
 // Helper methods
+
+// generateUniqueImageID generates a UUID and ensures it doesn't already exist in the repository
+func (s *ImageServiceImpl) generateUniqueImageID(ctx context.Context) (string, error) {
+	const maxAttempts = 10 // Prevent infinite loops in case of system issues
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// Generate a new UUID
+		candidateID := uuid.New().String()
+
+		logger.DebugWithContext(ctx, "Generating UUID for image upload",
+			zap.String("candidate_id", candidateID),
+			zap.Int("attempt", attempt))
+
+		// Check if this UUID already exists in the repository
+		exists, err := s.repo.Exists(ctx, candidateID)
+		if err != nil {
+			logger.ErrorWithContext(ctx, "Failed to check UUID existence in repository",
+				zap.String("candidate_id", candidateID),
+				zap.Int("attempt", attempt),
+				zap.Error(err))
+			return "", fmt.Errorf("failed to check UUID existence: %w", err)
+		}
+
+		if !exists {
+			// UUID is unique, we can use it
+			logger.InfoWithContext(ctx, "Generated unique UUID for image upload",
+				zap.String("image_id", candidateID),
+				zap.Int("attempts_required", attempt))
+			return candidateID, nil
+		}
+
+		// UUID collision detected, log it and try again
+		logger.WarnWithContext(ctx, "UUID collision detected, regenerating",
+			zap.String("colliding_id", candidateID),
+			zap.Int("attempt", attempt),
+			zap.Int("max_attempts", maxAttempts))
+	}
+
+	// If we've reached this point, we've exceeded max attempts
+	logger.ErrorWithContext(ctx, "Failed to generate unique UUID after maximum attempts",
+		zap.Int("max_attempts", maxAttempts))
+	return "", fmt.Errorf("failed to generate unique UUID after %d attempts", maxAttempts)
+}
 
 // validateUploadInput validates the upload input
 func (s *ImageServiceImpl) validateUploadInput(input UploadInput) error {
