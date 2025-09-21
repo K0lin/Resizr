@@ -243,6 +243,31 @@ func (m *MockImageRepository) UpdateResolutions(ctx context.Context, id string, 
 	return nil
 }
 
+// Statistics methods for MockImageRepository
+func (m *MockImageRepository) GetImageStatistics(ctx context.Context) (*models.ImageStatistics, error) {
+	return &models.ImageStatistics{}, nil
+}
+
+func (m *MockImageRepository) GetStorageStatistics(ctx context.Context) (*models.StorageStatistics, error) {
+	return &models.StorageStatistics{}, nil
+}
+
+func (m *MockImageRepository) GetImageCountByFormat(ctx context.Context) (map[string]int64, error) {
+	return map[string]int64{}, nil
+}
+
+func (m *MockImageRepository) GetResolutionStatistics(ctx context.Context) ([]models.ResolutionStat, error) {
+	return []models.ResolutionStat{}, nil
+}
+
+func (m *MockImageRepository) GetImagesByTimeRange(ctx context.Context, start, end time.Time) (int64, error) {
+	return 0, nil
+}
+
+func (m *MockImageRepository) GetStorageUsageByResolution(ctx context.Context) (map[string]int64, error) {
+	return map[string]int64{}, nil
+}
+
 // MockStorageProvider is a mock implementation of StorageProvider
 type MockStorageProvider struct {
 	UploadFunc               func(ctx context.Context, key string, data io.Reader, contentType string) error
@@ -393,7 +418,7 @@ func (m *MockDeduplicationRepository) GetDeduplicationInfo(ctx context.Context, 
 	if m.GetDeduplicationInfoFunc != nil {
 		return m.GetDeduplicationInfoFunc(ctx, hash)
 	}
-	return nil, nil
+	return nil, models.NotFoundError{Resource: "deduplication_info", ID: hash.String()}
 }
 
 func (m *MockDeduplicationRepository) UpdateDeduplicationInfo(ctx context.Context, info *models.DeduplicationInfo) error {
@@ -436,4 +461,25 @@ func (m *MockDeduplicationRepository) GetOrphanedHashes(ctx context.Context) ([]
 		return m.GetOrphanedHashesFunc(ctx)
 	}
 	return []models.ImageHash{}, nil
+}
+
+// Statistics methods for MockDeduplicationRepository
+func (m *MockDeduplicationRepository) GetDeduplicationStatistics(ctx context.Context) (*models.DeduplicationStatistics, error) {
+	return &models.DeduplicationStatistics{}, nil
+}
+
+func (m *MockDeduplicationRepository) GetHashStatistics(ctx context.Context) ([]models.HashStat, error) {
+	return []models.HashStat{}, nil
+}
+
+func (m *MockDeduplicationRepository) GetDuplicateCount(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+
+func (m *MockDeduplicationRepository) GetUniqueHashCount(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+
+func (m *MockDeduplicationRepository) GetStorageSavedByDeduplication(ctx context.Context) (int64, error) {
+	return 0, nil
 }

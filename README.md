@@ -219,6 +219,11 @@ https://your-domain.com/api/v1
 | `GET` | `/images/{id}/{resolution}/presigned-url` | Generate presigned URL for direct access | 50/min |
 | `DELETE` | `/images/{id}` | Delete entire image with deduplication cleanup | 10/min |
 | `DELETE` | `/images/{id}/{resolution}` | Delete specific resolution with reference tracking | 10/min |
+| `GET` | `/statistics` | Get comprehensive system statistics | 50/min |
+| `GET` | `/statistics/images` | Get image-specific statistics | 50/min |
+| `GET` | `/statistics/storage` | Get storage usage statistics | 50/min |
+| `GET` | `/statistics/deduplication` | Get deduplication statistics | 50/min |
+| `POST` | `/statistics/refresh` | Force refresh cached statistics | 10/min |
 | `GET` | `/health` | Health check with deduplication metrics | Unlimited |
 
 ### 🏷️ Resolution Aliases
@@ -372,7 +377,6 @@ Response includes deduplication metrics:
   "deduplication": {
     "enabled": true,
     "total_shared_resolutions": 1250,
-    "storage_saved_mb": 450.5,
     "average_references_per_resolution": 2.3
   }
 }
@@ -417,6 +421,149 @@ s3://bucket/
   }
 }
 ```
+
+### 📊 Statistics & Monitoring
+
+RESIZR provides comprehensive **statistics and monitoring endpoints** to help you track system performance, storage usage, and deduplication efficiency with intelligent caching for optimal performance.
+
+#### Statistics Endpoints
+
+RESIZR offers granular statistics through dedicated endpoints:
+
+**Comprehensive Statistics:**
+```bash
+# Get all system statistics
+curl http://localhost:8080/api/v1/statistics
+```
+
+**Granular Statistics:**
+```bash
+# Image statistics only
+curl http://localhost:8080/api/v1/statistics/images
+
+# Storage usage statistics
+curl http://localhost:8080/api/v1/statistics/storage
+
+# Deduplication efficiency metrics
+curl http://localhost:8080/api/v1/statistics/deduplication
+
+# Refresh cached statistics
+curl -X POST http://localhost:8080/api/v1/statistics/refresh
+```
+
+
+#### Query Parameters
+
+Control which statistics are included:
+
+```bash
+
+# Exclude system metrics
+curl "http://localhost:8080/api/v1/statistics?system=false"
+
+# Include detailed breakdown
+curl "http://localhost:8080/api/v1/statistics?detailed=true"
+```
+
+#### Statistics Response Structure
+
+**Comprehensive Statistics Response:**
+```json
+{
+  "images": {
+    "total_images": 2847,
+    "images_by_format": {
+      "jpeg": 1923,
+      "png": 782,
+      "webp": 142
+    },
+    "resolution_counts": {
+      "original": 2847,
+      "thumbnail": 2847,
+      "800x600": 1204,
+      "1920x1080": 891
+    }
+  },
+  "storage": {
+    "total_storage_used": 8943616000,
+    "original_images_size": 4521728000,
+    "processed_images_size": 4421888000,
+    "storage_by_resolution": {
+      "original": 4521728000,
+      "thumbnail": 892345600,
+      "800x600": 2890752000,
+      "1920x1080": 638976000
+    },
+    "average_compression_ratio": 0.82
+  },
+  "deduplication": {
+    "total_duplicates_found": 456,
+    "deduped_images": 456,
+    "unique_images": 2391,
+    "deduplication_rate": 16.0,
+    "average_references_per_hash": 1.19
+  },
+  "system": {
+    "uptime_seconds": 2634720,
+    "go_version": "go1.25.1",
+    "version": "4.0.0",
+    "cpu_count": 8,
+    "memory_allocated": 67108864,
+    "memory_total": 134217728,
+    "memory_system": 201326592,
+    "goroutine_count": 42,
+    "gc_cycles": 1247,
+    "last_gc_pause": "2.1ms"
+  },
+  "timestamp": "2025-09-20T10:30:45Z"
+}
+```
+
+#### Intelligent Caching
+
+Statistics are **automatically cached** for optimal performance:
+
+**Cache Configuration:**
+```env
+# Statistics cache settings
+STATISTICS_CACHE_ENABLED=true    # Enable statistics caching (default: true)
+STATISTICS_CACHE_TTL=300         # Cache TTL in seconds (default: 5 minutes)
+```
+
+**Cache Behavior:**
+- **Automatic Caching**: Statistics are cached after first calculation
+- **TTL-Based Expiry**: Cache expires based on `STATISTICS_CACHE_TTL` setting
+- **Manual Refresh**: Use `POST /statistics/refresh` to force cache invalidation
+- **Performance Optimized**: Expensive calculations are cached to prevent database load
+
+#### Use Cases
+
+**Operations Monitoring:**
+- Track image upload trends and storage growth
+- Monitor deduplication effectiveness and storage savings
+- Analyze cache performance and optimization opportunities
+
+**Capacity Planning:**
+- Predict storage requirements based on upload patterns
+- Optimize cache settings based on hit rates
+- Plan infrastructure scaling using performance metrics
+
+**Cost Optimization:**
+- Quantify storage savings from deduplication
+- Identify opportunities for format optimization
+- Monitor S3 API usage through cache metrics
+
+**Dashboard Integration:**
+- Real-time metrics for monitoring dashboards
+- Historical data analysis for trending
+- Alerting based on performance thresholds
+
+#### Performance Considerations
+
+- **Cached by Default**: Statistics are cached for 5 minutes to prevent database load
+- **Granular Endpoints**: Use specific endpoints (e.g., `/statistics/images`) for focused data
+- **Query Parameters**: Exclude unnecessary data using query parameters
+- **Background Refresh**: Consider background jobs for very large datasets
 
 ### �🔐 Authentication
 
@@ -498,6 +645,10 @@ RESIZR uses environment variables for configuration.
 - `S3_HEALTHCHECKS_DISABLE`: Disable S3 health checks to reduce API calls (default: false)
 - `S3_HEALTHCHECKS_INTERVAL`: Interval between S3 health checks in seconds (default: 30s, minimum: 10s)
 - `HEALTHCHECK_INTERVAL`: Docker health check interval in seconds (minimum: 10s)
+
+### Statistics
+- `STATISTICS_CACHE_ENABLED`: Enable statistics caching (default: true)
+- `STATISTICS_CACHE_TTL`: Cache TTL in seconds (default: 300)
 
 ### Limits
 - `RATE_LIMIT_UPLOAD`: Upload rate limit per IP

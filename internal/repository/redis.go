@@ -797,3 +797,501 @@ func (r *RedisRepository) GetOrphanedHashes(ctx context.Context) ([]models.Image
 
 	return orphanedHashes, nil
 }
+
+// Statistics methods implementation
+
+// GetImageCountByFormat returns count of images by format
+func (r *RedisRepository) GetImageCountByFormat(ctx context.Context) (map[string]int64, error) {
+	formatCounts := make(map[string]int64)
+
+	// Get all image metadata keys
+	keys, err := r.findKeysByPattern(ctx, r.getMetadataKey("*"))
+	if err != nil {
+		return nil, err
+	}
+
+	// Count by format
+	for _, key := range keys {
+		data, err := r.client.HGetAll(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		if mimeType, ok := data["mime_type"]; ok {
+			// Extract format from MIME type (e.g., "image/jpeg" -> "jpeg")
+			format := strings.TrimPrefix(mimeType, "image/")
+			formatCounts[format]++
+		}
+	}
+
+	return formatCounts, nil
+}
+
+// GetImageStatistics retrieves detailed image statistics
+func (r *RedisRepository) GetImageStatistics(ctx context.Context) (*models.ImageStatistics, error) {
+	// Get all image metadata keys
+	keys, err := r.findKeysByPattern(ctx, r.getMetadataKey("*"))
+	if err != nil {
+		return nil, err
+	}
+
+	totalImages := int64(len(keys))
+	formatCounts := make(map[string]int64)
+	resolutionCounts := make(map[string]int64)
+	resolutionStats := make(map[string]*models.ResolutionStat)
+
+	var totalSize, largestSize, smallestSize int64
+	smallestSize = -1 // Initialize to -1 to detect first image
+
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	weekStart := todayStart.AddDate(0, 0, -7)
+	monthStart := todayStart.AddDate(0, -1, 0)
+
+	var imagesToday, imagesWeek, imagesMonth int64
+
+	// Process each image
+	for _, key := range keys {
+		data, err := r.client.HGetAll(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		// Count by format
+		if mimeType, ok := data["mime_type"]; ok {
+			format := strings.TrimPrefix(mimeType, "image/")
+			formatCounts[format]++
+		}
+
+		// Calculate size statistics
+		if sizeStr, ok := data["size"]; ok {
+			if size, err := strconv.ParseInt(sizeStr, 10, 64); err == nil {
+				totalSize += size
+				if size > largestSize {
+					largestSize = size
+				}
+				if smallestSize == -1 || size < smallestSize {
+					smallestSize = size
+				}
+			}
+		}
+
+		// Count resolutions
+		if resStr, ok := data["resolutions"]; ok && resStr != "" {
+			resolutions := strings.Split(resStr, ",")
+			for _, res := range resolutions {
+				res = strings.TrimSpace(res)
+				if res != "" {
+					resolutionCounts[res]++
+
+					// Track resolution stats
+					if _, exists := resolutionStats[res]; !exists {
+						resolutionStats[res] = &models.ResolutionStat{
+							Resolution: res,
+							Count:      0,
+						}
+					}
+					resolutionStats[res].Count++
+				}
+			}
+		}
+
+		// Count by time range
+		if createdAtStr, ok := data["created_at"]; ok {
+			if createdAt, err := time.Parse(time.RFC3339, createdAtStr); err == nil {
+				if createdAt.After(todayStart) {
+					imagesToday++
+				}
+				if createdAt.After(weekStart) {
+					imagesWeek++
+				}
+				if createdAt.After(monthStart) {
+					imagesMonth++
+				}
+			}
+		}
+	}
+
+	// Convert resolution stats to slice and sort by count
+	topResolutions := make([]models.ResolutionStat, 0, len(resolutionStats))
+	for _, stat := range resolutionStats {
+		topResolutions = append(topResolutions, *stat)
+	}
+
+	// Sort by count (descending)
+	for i := 0; i < len(topResolutions); i++ {
+		for j := i + 1; j < len(topResolutions); j++ {
+			if topResolutions[j].Count > topResolutions[i].Count {
+				topResolutions[i], topResolutions[j] = topResolutions[j], topResolutions[i]
+			}
+		}
+	}
+
+	// Limit to top 10
+	if len(topResolutions) > 10 {
+		topResolutions = topResolutions[:10]
+	}
+
+	// Handle edge case for smallest size
+	if smallestSize == -1 {
+		smallestSize = 0
+	}
+
+	// Calculate total resolutions
+	var totalResolutions int64
+	for _, count := range resolutionCounts {
+		totalResolutions += count
+	}
+
+	return &models.ImageStatistics{
+		TotalImages:        totalImages,
+		ImagesByFormat:     formatCounts,
+		ResolutionCounts:   resolutionCounts,
+		ImagesCreatedToday: imagesToday,
+		ImagesCreatedWeek:  imagesWeek,
+		ImagesCreatedMonth: imagesMonth,
+		TotalResolutions:   totalResolutions,
+		TopResolutions:     topResolutions,
+	}, nil
+}
+
+// GetStorageStatistics retrieves detailed storage statistics
+func (r *RedisRepository) GetStorageStatistics(ctx context.Context) (*models.StorageStatistics, error) {
+	// Get all image metadata keys
+	keys, err := r.findKeysByPattern(ctx, r.getMetadataKey("*"))
+	if err != nil {
+		return nil, err
+	}
+
+	storageByResolution := make(map[string]int64)
+	var totalStorage, originalSize, processedSize int64
+
+	// Process each image
+	for _, key := range keys {
+		data, err := r.client.HGetAll(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		// Get original image size
+		if sizeStr, ok := data["size"]; ok {
+			if size, err := strconv.ParseInt(sizeStr, 10, 64); err == nil {
+				originalSize += size
+				totalStorage += size
+				storageByResolution["original"] += size
+			}
+		}
+
+		// Estimate processed image sizes (rough calculation)
+		if resStr, ok := data["resolutions"]; ok && resStr != "" {
+			resolutions := strings.Split(resStr, ",")
+			if originalSizeStr, ok := data["size"]; ok {
+				if originalImageSize, err := strconv.ParseInt(originalSizeStr, 10, 64); err == nil {
+					for _, res := range resolutions {
+						res = strings.TrimSpace(res)
+						if res != "" && res != "original" {
+							// Estimate processed image size (roughly 70% of original for resized images)
+							estimatedSize := int64(float64(originalImageSize) * 0.7)
+							processedSize += estimatedSize
+							totalStorage += estimatedSize
+							storageByResolution[res] += estimatedSize
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Calculate compression ratio
+	var compressionRatio float64 = 1.0
+	if originalSize > 0 && processedSize > 0 {
+		compressionRatio = float64(processedSize) / float64(originalSize)
+	}
+
+	return &models.StorageStatistics{
+		TotalStorageUsed:        totalStorage,
+		OriginalImagesSize:      originalSize,
+		ProcessedImagesSize:     processedSize,
+		StorageByResolution:     storageByResolution,
+		AverageCompressionRatio: compressionRatio,
+	}, nil
+}
+
+// GetResolutionStatistics returns statistics for each resolution
+func (r *RedisRepository) GetResolutionStatistics(ctx context.Context) ([]models.ResolutionStat, error) {
+	// Get all image metadata keys
+	keys, err := r.findKeysByPattern(ctx, r.getMetadataKey("*"))
+	if err != nil {
+		return nil, err
+	}
+
+	resolutionStats := make(map[string]*models.ResolutionStat)
+
+	// Process each image
+	for _, key := range keys {
+		data, err := r.client.HGetAll(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		// Process resolutions
+		if resStr, ok := data["resolutions"]; ok && resStr != "" {
+			resolutions := strings.Split(resStr, ",")
+			for _, res := range resolutions {
+				res = strings.TrimSpace(res)
+				if res != "" {
+					if _, exists := resolutionStats[res]; !exists {
+						resolutionStats[res] = &models.ResolutionStat{
+							Resolution: res,
+							Count:      0,
+						}
+					}
+					resolutionStats[res].Count++
+
+				}
+			}
+		}
+	}
+
+	// Convert to slice and sort by count
+	stats := make([]models.ResolutionStat, 0, len(resolutionStats))
+	for _, stat := range resolutionStats {
+		stats = append(stats, *stat)
+	}
+
+	// Sort by count (descending)
+	for i := 0; i < len(stats); i++ {
+		for j := i + 1; j < len(stats); j++ {
+			if stats[j].Count > stats[i].Count {
+				stats[i], stats[j] = stats[j], stats[i]
+			}
+		}
+	}
+
+	return stats, nil
+}
+
+// GetImagesByTimeRange returns count of images created in time range
+func (r *RedisRepository) GetImagesByTimeRange(ctx context.Context, start, end time.Time) (int64, error) {
+	// Get all image metadata keys
+	keys, err := r.findKeysByPattern(ctx, r.getMetadataKey("*"))
+	if err != nil {
+		return 0, err
+	}
+
+	var count int64
+
+	// Process each image
+	for _, key := range keys {
+		data, err := r.client.HGetAll(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		// Check creation time
+		if createdAtStr, ok := data["created_at"]; ok {
+			if createdAt, err := time.Parse(time.RFC3339, createdAtStr); err == nil {
+				if (createdAt.Equal(start) || createdAt.After(start)) && createdAt.Before(end) {
+					count++
+				}
+			}
+		}
+	}
+
+	return count, nil
+}
+
+// GetStorageUsageByResolution returns storage usage per resolution
+func (r *RedisRepository) GetStorageUsageByResolution(ctx context.Context) (map[string]int64, error) {
+	// Get all image metadata keys
+	keys, err := r.findKeysByPattern(ctx, r.getMetadataKey("*"))
+	if err != nil {
+		return nil, err
+	}
+
+	storageByResolution := make(map[string]int64)
+
+	// Process each image
+	for _, key := range keys {
+		data, err := r.client.HGetAll(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		// Get original image size
+		var originalSize int64
+		if sizeStr, ok := data["size"]; ok {
+			originalSize, _ = strconv.ParseInt(sizeStr, 10, 64)
+		}
+
+		// Process resolutions
+		if resStr, ok := data["resolutions"]; ok && resStr != "" {
+			resolutions := strings.Split(resStr, ",")
+			for _, res := range resolutions {
+				res = strings.TrimSpace(res)
+				if res != "" {
+					// Estimate size (original gets full size, others get 70%)
+					if res == "original" {
+						storageByResolution[res] += originalSize
+					} else {
+						storageByResolution[res] += int64(float64(originalSize) * 0.7)
+					}
+				}
+			}
+		} else {
+			// If no resolutions specified, assume original
+			storageByResolution["original"] += originalSize
+		}
+	}
+
+	return storageByResolution, nil
+}
+
+// Deduplication statistics methods
+
+// GetDeduplicationStatistics retrieves comprehensive deduplication statistics
+func (r *RedisRepository) GetDeduplicationStatistics(ctx context.Context) (*models.DeduplicationStatistics, error) {
+	// Get all deduplication keys
+	keys, err := r.client.Keys(ctx, "dedup:*").Result()
+	if err != nil {
+		return nil, err
+	}
+
+	uniqueHashes := int64(len(keys))
+	var totalDuplicates int64
+	var totalReferences int64
+
+	for _, key := range keys {
+		data, err := r.client.HGetAll(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		if countStr, ok := data["reference_count"]; ok {
+			if count, err := strconv.ParseInt(countStr, 10, 64); err == nil {
+				totalReferences += count
+				if count > 1 {
+					totalDuplicates += count - 1 // First reference is original
+				}
+			}
+		}
+	}
+
+	dedupRate := float64(0)
+	if totalReferences > 0 {
+		dedupRate = float64(totalDuplicates) / float64(totalReferences) * 100
+	}
+
+	stats := &models.DeduplicationStatistics{
+		TotalDuplicatesFound:     totalDuplicates,
+		DedupedImages:            totalDuplicates,
+		UniqueImages:             uniqueHashes,
+		DeduplicationRate:        dedupRate,
+		AverageReferencesPerHash: totalReferences / max(uniqueHashes, 1),
+	}
+
+	return stats, nil
+}
+
+// GetHashStatistics returns statistics for all hashes
+func (r *RedisRepository) GetHashStatistics(ctx context.Context) ([]models.HashStat, error) {
+	var hashStats []models.HashStat
+
+	keys, err := r.client.Keys(ctx, "dedup:*").Result()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, key := range keys {
+		data, err := r.client.HGetAll(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		stat := models.HashStat{
+			Hash:       data["hash_value"],
+			StorageKey: data["storage_key"],
+		}
+
+		if countStr, ok := data["reference_count"]; ok {
+			if count, err := strconv.ParseInt(countStr, 10, 64); err == nil {
+				stat.ReferenceCount = count
+			}
+		}
+
+		hashStats = append(hashStats, stat)
+	}
+
+	return hashStats, nil
+}
+
+// GetDuplicateCount returns total number of duplicate images
+func (r *RedisRepository) GetDuplicateCount(ctx context.Context) (int64, error) {
+	keys, err := r.client.Keys(ctx, "dedup:*").Result()
+	if err != nil {
+		return 0, err
+	}
+
+	var totalDuplicates int64
+	for _, key := range keys {
+		countStr, err := r.client.HGet(ctx, key, "reference_count").Result()
+		if err != nil {
+			continue
+		}
+
+		if count, err := strconv.ParseInt(countStr, 10, 64); err == nil && count > 1 {
+			totalDuplicates += count - 1
+		}
+	}
+
+	return totalDuplicates, nil
+}
+
+// GetUniqueHashCount returns number of unique hashes
+func (r *RedisRepository) GetUniqueHashCount(ctx context.Context) (int64, error) {
+	keys, err := r.client.Keys(ctx, "dedup:*").Result()
+	if err != nil {
+		return 0, err
+	}
+	return int64(len(keys)), nil
+}
+
+// GetStorageSavedByDeduplication calculates total storage saved
+func (r *RedisRepository) GetStorageSavedByDeduplication(ctx context.Context) (int64, error) {
+	keys, err := r.client.Keys(ctx, "dedup:*").Result()
+	if err != nil {
+		return 0, err
+	}
+
+	var totalSavings int64
+	for _, key := range keys {
+		data, err := r.client.HGetAll(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		// Get reference count and original size
+		countStr, hasCount := data["reference_count"]
+		sizeStr, hasSize := data["original_size"]
+
+		if hasCount && hasSize {
+			if count, err := strconv.ParseInt(countStr, 10, 64); err == nil && count > 1 {
+				if size, err := strconv.ParseInt(sizeStr, 10, 64); err == nil {
+					// Savings = (reference_count - 1) * original_size
+					// This is the storage we would have used without deduplication
+					totalSavings += (count - 1) * size
+				}
+			}
+		}
+	}
+
+	return totalSavings, nil
+}
+
+// Helper function for max
+func max(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
