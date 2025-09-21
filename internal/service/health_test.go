@@ -94,6 +94,41 @@ func (m *mockImageRepository) GetOrphanedHashes(ctx context.Context) ([]models.I
 	return nil, nil
 }
 
+// Statistics methods
+func (m *mockImageRepository) GetImageStatistics(ctx context.Context) (*models.ImageStatistics, error) {
+	return &models.ImageStatistics{}, nil
+}
+func (m *mockImageRepository) GetStorageStatistics(ctx context.Context) (*models.StorageStatistics, error) {
+	return &models.StorageStatistics{}, nil
+}
+func (m *mockImageRepository) GetImageCountByFormat(ctx context.Context) (map[string]int64, error) {
+	return map[string]int64{}, nil
+}
+func (m *mockImageRepository) GetResolutionStatistics(ctx context.Context) ([]models.ResolutionStat, error) {
+	return []models.ResolutionStat{}, nil
+}
+func (m *mockImageRepository) GetImagesByTimeRange(ctx context.Context, start, end time.Time) (int64, error) {
+	return 0, nil
+}
+func (m *mockImageRepository) GetStorageUsageByResolution(ctx context.Context) (map[string]int64, error) {
+	return map[string]int64{}, nil
+}
+func (m *mockImageRepository) GetDeduplicationStatistics(ctx context.Context) (*models.DeduplicationStatistics, error) {
+	return &models.DeduplicationStatistics{}, nil
+}
+func (m *mockImageRepository) GetHashStatistics(ctx context.Context) ([]models.HashStat, error) {
+	return []models.HashStat{}, nil
+}
+func (m *mockImageRepository) GetDuplicateCount(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+func (m *mockImageRepository) GetUniqueHashCount(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+func (m *mockImageRepository) GetStorageSavedByDeduplication(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+
 // Cache methods
 func (m *mockImageRepository) SetCachedURL(ctx context.Context, imageID, resolution, url string, ttl time.Duration) error {
 	return nil

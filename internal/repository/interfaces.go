@@ -33,6 +33,24 @@ type ImageRepository interface {
 	// GetStats retrieves storage statistics
 	GetStats(ctx context.Context) (*RepositoryStats, error)
 
+	// GetImageStatistics retrieves detailed image statistics
+	GetImageStatistics(ctx context.Context) (*models.ImageStatistics, error)
+
+	// GetStorageStatistics retrieves detailed storage statistics
+	GetStorageStatistics(ctx context.Context) (*models.StorageStatistics, error)
+
+	// GetImageCountByFormat returns count of images by format
+	GetImageCountByFormat(ctx context.Context) (map[string]int64, error)
+
+	// GetResolutionStatistics returns statistics for each resolution
+	GetResolutionStatistics(ctx context.Context) ([]models.ResolutionStat, error)
+
+	// GetImagesByTimeRange returns count of images created in time range
+	GetImagesByTimeRange(ctx context.Context, start, end time.Time) (int64, error)
+
+	// GetStorageUsageByResolution returns storage usage per resolution
+	GetStorageUsageByResolution(ctx context.Context) (map[string]int64, error)
+
 	// Health checks repository health
 	Health(ctx context.Context) error
 
@@ -65,6 +83,21 @@ type DeduplicationRepository interface {
 
 	// GetOrphanedHashes returns hashes with no image references
 	GetOrphanedHashes(ctx context.Context) ([]models.ImageHash, error)
+
+	// GetDeduplicationStatistics retrieves comprehensive deduplication statistics
+	GetDeduplicationStatistics(ctx context.Context) (*models.DeduplicationStatistics, error)
+
+	// GetHashStatistics returns statistics for all hashes
+	GetHashStatistics(ctx context.Context) ([]models.HashStat, error)
+
+	// GetDuplicateCount returns total number of duplicate images
+	GetDuplicateCount(ctx context.Context) (int64, error)
+
+	// GetUniqueHashCount returns number of unique hashes
+	GetUniqueHashCount(ctx context.Context) (int64, error)
+
+	// GetStorageSavedByDeduplication calculates total storage saved
+	GetStorageSavedByDeduplication(ctx context.Context) (int64, error)
 }
 
 // CompositeRepository combines all repository interfaces for full functionality

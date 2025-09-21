@@ -53,6 +53,26 @@ func (m *mockDeduplicationRepositoryForImageService) GetOrphanedHashes(_ context
 	return []models.ImageHash{}, nil
 }
 
+func (m *mockDeduplicationRepositoryForImageService) GetDeduplicationStatistics(_ context.Context) (*models.DeduplicationStatistics, error) {
+	return nil, nil
+}
+
+func (m *mockDeduplicationRepositoryForImageService) GetDuplicateCount(_ context.Context) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockDeduplicationRepositoryForImageService) GetUniqueHashCount(_ context.Context) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockDeduplicationRepositoryForImageService) GetStorageSavedByDeduplication(_ context.Context) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockDeduplicationRepositoryForImageService) GetHashStatistics(_ context.Context) ([]models.HashStat, error) {
+	return nil, nil
+}
+
 type mockImageRepositoryForImageService struct {
 	saveFunc     func(ctx context.Context, metadata *models.ImageMetadata) error
 	getByIDFunc  func(ctx context.Context, id string) (*models.ImageMetadata, error)
@@ -142,6 +162,30 @@ func (m *mockImageRepositoryForImageService) GetStats(ctx context.Context) (*rep
 
 func (m *mockImageRepositoryForImageService) UpdateResolutions(_ context.Context, _ string, _ []string) error {
 	return nil
+}
+
+func (m *mockImageRepositoryForImageService) GetImageCountByFormat(_ context.Context) (map[string]int64, error) {
+	return nil, nil
+}
+
+func (m *mockImageRepositoryForImageService) GetImageStatistics(_ context.Context) (*models.ImageStatistics, error) {
+	return nil, nil
+}
+
+func (m *mockImageRepositoryForImageService) GetStorageStatistics(_ context.Context) (*models.StorageStatistics, error) {
+	return nil, nil
+}
+
+func (m *mockImageRepositoryForImageService) GetResolutionStatistics(_ context.Context) ([]models.ResolutionStat, error) {
+	return nil, nil
+}
+
+func (m *mockImageRepositoryForImageService) GetImagesByTimeRange(_ context.Context, _ time.Time, _ time.Time) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockImageRepositoryForImageService) GetStorageUsageByResolution(_ context.Context) (map[string]int64, error) {
+	return nil, nil
 }
 
 type mockStorageProviderForImageService struct {

@@ -612,3 +612,471 @@ func (b *BadgerImageRepository) GetOrphanedHashes(ctx context.Context) ([]models
 func (b *BadgerImageRepository) getDeduplicationKey(hash models.ImageHash) string {
 	return fmt.Sprintf("dedup:%s", hash.GetHashKey())
 }
+
+// Statistics methods implementation
+
+// GetImageCountByFormat returns count of images by format
+func (b *BadgerImageRepository) GetImageCountByFormat(ctx context.Context) (map[string]int64, error) {
+	formatCounts := make(map[string]int64)
+	prefix := "image:metadata:"
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		iter := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer iter.Close()
+
+		for iter.Seek([]byte(prefix)); iter.ValidForPrefix([]byte(prefix)); iter.Next() {
+			item := iter.Item()
+
+			err := item.Value(func(val []byte) error {
+				var metadata models.ImageMetadata
+				if err := json.Unmarshal(val, &metadata); err != nil {
+					return err
+				}
+
+				// Extract format from MIME type (e.g., "image/jpeg" -> "jpeg")
+				format := strings.TrimPrefix(metadata.MimeType, "image/")
+				formatCounts[format]++
+				return nil
+			})
+
+			if err != nil {
+				logger.WarnWithContext(ctx, "Failed to unmarshal metadata during format count",
+					zap.String("key", string(item.Key())),
+					zap.Error(err))
+				continue
+			}
+		}
+		return nil
+	})
+
+	return formatCounts, err
+}
+
+// GetImageStatistics retrieves detailed image statistics
+func (b *BadgerImageRepository) GetImageStatistics(ctx context.Context) (*models.ImageStatistics, error) {
+	// Get total count
+	totalImages, err := b.countImages(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get format counts
+	formatCounts, err := b.GetImageCountByFormat(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get resolution statistics
+	resolutionStats, err := b.GetResolutionStatistics(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert resolution stats to counts map
+	resolutionCounts := make(map[string]int64)
+	var totalResolutions int64
+	for _, stat := range resolutionStats {
+		resolutionCounts[stat.Resolution] = stat.Count
+		totalResolutions += stat.Count
+	}
+
+	// Calculate time-based statistics
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	weekStart := todayStart.AddDate(0, 0, -7)
+	monthStart := todayStart.AddDate(0, -1, 0)
+
+	imagesToday, _ := b.GetImagesByTimeRange(ctx, todayStart, now)
+	imagesWeek, _ := b.GetImagesByTimeRange(ctx, weekStart, now)
+	imagesMonth, _ := b.GetImagesByTimeRange(ctx, monthStart, now)
+
+	stats := &models.ImageStatistics{
+		TotalImages:        totalImages,
+		ImagesByFormat:     formatCounts,
+		ResolutionCounts:   resolutionCounts,
+		TopResolutions:     resolutionStats,
+		TotalResolutions:   totalResolutions,
+		ImagesCreatedToday: imagesToday,
+		ImagesCreatedWeek:  imagesWeek,
+		ImagesCreatedMonth: imagesMonth,
+	}
+
+	return stats, nil
+}
+
+// GetStorageStatistics retrieves detailed storage statistics
+func (b *BadgerImageRepository) GetStorageStatistics(ctx context.Context) (*models.StorageStatistics, error) {
+	// Get storage usage by resolution
+	storageByResolution, err := b.GetStorageUsageByResolution(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate totals
+	var totalStorage, originalSize, processedSize int64
+	for resolution, size := range storageByResolution {
+		totalStorage += size
+		if resolution == "original" {
+			originalSize += size
+		} else {
+			processedSize += size
+		}
+	}
+
+	// Calculate compression ratio
+	var compressionRatio float64 = 1.0
+	if originalSize > 0 && processedSize > 0 {
+		compressionRatio = float64(processedSize) / float64(originalSize)
+	}
+
+	stats := &models.StorageStatistics{
+		TotalStorageUsed:        totalStorage,
+		OriginalImagesSize:      originalSize,
+		ProcessedImagesSize:     processedSize,
+		StorageByResolution:     storageByResolution,
+		AverageCompressionRatio: compressionRatio,
+	}
+
+	return stats, nil
+}
+
+// GetResolutionStatistics returns statistics for each resolution
+func (b *BadgerImageRepository) GetResolutionStatistics(ctx context.Context) ([]models.ResolutionStat, error) {
+	resolutionCounts := make(map[string]int64)
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+
+		prefix := []byte("img:")
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+
+			err := item.Value(func(val []byte) error {
+				var metadata models.ImageMetadata
+				if err := json.Unmarshal(val, &metadata); err != nil {
+					return err
+				}
+
+				// Count each resolution available for this image
+				for _, resolution := range metadata.Resolutions {
+					resolutionCounts[resolution]++
+				}
+				return nil
+			})
+
+			if err != nil {
+				logger.WarnWithContext(ctx, "Failed to unmarshal metadata during resolution statistics",
+					zap.String("key", string(item.Key())),
+					zap.Error(err))
+				continue
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert map to slice and sort by count (descending)
+	stats := make([]models.ResolutionStat, 0, len(resolutionCounts))
+	for resolution, count := range resolutionCounts {
+		stats = append(stats, models.ResolutionStat{
+			Resolution: resolution,
+			Count:      count,
+		})
+	}
+
+	// Sort by count (descending)
+	for i := 0; i < len(stats); i++ {
+		for j := i + 1; j < len(stats); j++ {
+			if stats[j].Count > stats[i].Count {
+				stats[i], stats[j] = stats[j], stats[i]
+			}
+		}
+	}
+
+	return stats, nil
+}
+
+// GetImagesByTimeRange returns count of images created in time range
+func (b *BadgerImageRepository) GetImagesByTimeRange(ctx context.Context, start, end time.Time) (int64, error) {
+	var count int64
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+
+		prefix := []byte("img:")
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+
+			err := item.Value(func(val []byte) error {
+				var metadata models.ImageMetadata
+				if err := json.Unmarshal(val, &metadata); err != nil {
+					return err
+				}
+
+				// Check if image was created within the time range
+				if metadata.CreatedAt.After(start) && metadata.CreatedAt.Before(end) {
+					count++
+				}
+				return nil
+			})
+
+			if err != nil {
+				logger.WarnWithContext(ctx, "Failed to unmarshal metadata during time range filtering",
+					zap.String("key", string(item.Key())),
+					zap.Error(err))
+				continue
+			}
+		}
+		return nil
+	})
+
+	return count, err
+}
+
+// GetStorageUsageByResolution returns storage usage per resolution
+func (b *BadgerImageRepository) GetStorageUsageByResolution(ctx context.Context) (map[string]int64, error) {
+	storageByResolution := make(map[string]int64)
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+
+		prefix := []byte("img:")
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+
+			err := item.Value(func(val []byte) error {
+				var metadata models.ImageMetadata
+				if err := json.Unmarshal(val, &metadata); err != nil {
+					return err
+				}
+
+				// Add original size (using the Size field which represents original size)
+				storageByResolution["original"] += metadata.Size
+
+				// For now, estimate other resolution sizes as proportional to original
+				// In a real implementation, you'd track actual sizes per resolution
+				for _, resolution := range metadata.Resolutions {
+					if resolution != "original" {
+						// Estimate processed size as 70% of original for simplicity
+						estimatedSize := int64(float64(metadata.Size) * 0.7)
+						storageByResolution[resolution] += estimatedSize
+					}
+				}
+
+				return nil
+			})
+
+			if err != nil {
+				logger.WarnWithContext(ctx, "Failed to unmarshal metadata during storage calculation",
+					zap.String("key", string(item.Key())),
+					zap.Error(err))
+				continue
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return storageByResolution, nil
+}
+
+// Deduplication statistics methods
+
+// GetDeduplicationStatistics retrieves comprehensive deduplication statistics
+func (b *BadgerImageRepository) GetDeduplicationStatistics(ctx context.Context) (*models.DeduplicationStatistics, error) {
+	prefix := "dedup:"
+	var uniqueHashes int64
+	var totalDuplicates int64
+	var totalReferences int64
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		iter := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer iter.Close()
+
+		for iter.Seek([]byte(prefix)); iter.ValidForPrefix([]byte(prefix)); iter.Next() {
+			item := iter.Item()
+			uniqueHashes++
+
+			err := item.Value(func(val []byte) error {
+				var info models.DeduplicationInfo
+				if err := json.Unmarshal(val, &info); err != nil {
+					return err
+				}
+
+				count := int64(info.ReferenceCount)
+				totalReferences += count
+				if count > 1 {
+					totalDuplicates += count - 1 // First reference is original
+				}
+				return nil
+			})
+
+			if err != nil {
+				continue
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	dedupRate := float64(0)
+	if totalReferences > 0 {
+		dedupRate = float64(totalDuplicates) / float64(totalReferences) * 100
+	}
+
+	stats := &models.DeduplicationStatistics{
+		TotalDuplicatesFound:     totalDuplicates,
+		DedupedImages:            totalDuplicates,
+		UniqueImages:             uniqueHashes,
+		DeduplicationRate:        dedupRate,
+		AverageReferencesPerHash: totalReferences / max(uniqueHashes, 1),
+	}
+
+	return stats, nil
+}
+
+// GetHashStatistics returns statistics for all hashes
+func (b *BadgerImageRepository) GetHashStatistics(ctx context.Context) ([]models.HashStat, error) {
+	var hashStats []models.HashStat
+	prefix := "dedup:"
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		iter := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer iter.Close()
+
+		for iter.Seek([]byte(prefix)); iter.ValidForPrefix([]byte(prefix)); iter.Next() {
+			item := iter.Item()
+
+			err := item.Value(func(val []byte) error {
+				var info models.DeduplicationInfo
+				if err := json.Unmarshal(val, &info); err != nil {
+					return err
+				}
+
+				stat := models.HashStat{
+					Hash:           info.Hash.Value,
+					ReferenceCount: int64(info.ReferenceCount),
+					StorageKey:     info.StorageKey,
+				}
+
+				hashStats = append(hashStats, stat)
+				return nil
+			})
+
+			if err != nil {
+				continue
+			}
+		}
+		return nil
+	})
+
+	return hashStats, err
+}
+
+// GetDuplicateCount returns total number of duplicate images
+func (b *BadgerImageRepository) GetDuplicateCount(ctx context.Context) (int64, error) {
+	prefix := "dedup:"
+	var totalDuplicates int64
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		iter := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer iter.Close()
+
+		for iter.Seek([]byte(prefix)); iter.ValidForPrefix([]byte(prefix)); iter.Next() {
+			item := iter.Item()
+
+			err := item.Value(func(val []byte) error {
+				var info models.DeduplicationInfo
+				if err := json.Unmarshal(val, &info); err != nil {
+					return err
+				}
+
+				if info.ReferenceCount > 1 {
+					totalDuplicates += int64(info.ReferenceCount) - 1
+				}
+				return nil
+			})
+
+			if err != nil {
+				continue
+			}
+		}
+		return nil
+	})
+
+	return totalDuplicates, err
+}
+
+// GetUniqueHashCount returns number of unique hashes
+func (b *BadgerImageRepository) GetUniqueHashCount(ctx context.Context) (int64, error) {
+	prefix := "dedup:"
+	var count int64
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		iter := txn.NewIterator(opts)
+		defer iter.Close()
+
+		for iter.Seek([]byte(prefix)); iter.ValidForPrefix([]byte(prefix)); iter.Next() {
+			count++
+		}
+		return nil
+	})
+
+	return count, err
+}
+
+// GetStorageSavedByDeduplication calculates total storage saved
+func (b *BadgerImageRepository) GetStorageSavedByDeduplication(ctx context.Context) (int64, error) {
+	var totalSaved int64
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		// Iterate through deduplication info to find shared content
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+
+		prefix := []byte("dedup:")
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+
+			err := item.Value(func(val []byte) error {
+				var dedupInfo models.DeduplicationInfo
+				if err := json.Unmarshal(val, &dedupInfo); err != nil {
+					return err
+				}
+
+				// Calculate savings: (reference_count - 1) * original_size
+				// This represents the storage we would have used without deduplication
+				if len(dedupInfo.ReferencingIDs) > 1 {
+					savedInstances := int64(len(dedupInfo.ReferencingIDs) - 1)
+					totalSaved += savedInstances * dedupInfo.Hash.Size
+				}
+
+				return nil
+			})
+
+			if err != nil {
+				logger.WarnWithContext(ctx, "Failed to unmarshal deduplication info during savings calculation",
+					zap.String("key", string(item.Key())),
+					zap.Error(err))
+				continue
+			}
+		}
+		return nil
+	})
+
+	return totalSaved, err
+}

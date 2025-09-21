@@ -4,6 +4,7 @@ import (
 	"resizr/internal/api/handlers"
 	"resizr/internal/api/middleware"
 	"resizr/internal/config"
+	"resizr/internal/models"
 	"resizr/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -11,15 +12,16 @@ import (
 
 // Router holds the HTTP router and dependencies
 type Router struct {
-	engine        *gin.Engine
-	config        *config.Config
-	imageHandler  *handlers.ImageHandler
-	healthHandler *handlers.HealthHandler
-	authHandler   *handlers.AuthHandler
+	engine            *gin.Engine
+	config            *config.Config
+	imageHandler      *handlers.ImageHandler
+	healthHandler     *handlers.HealthHandler
+	authHandler       *handlers.AuthHandler
+	statisticsHandler *handlers.StatisticsHandler
 }
 
 // NewRouter creates a new HTTP router with all routes configured
-func NewRouter(cfg *config.Config, imageService service.ImageService, healthService service.HealthService) *Router {
+func NewRouter(cfg *config.Config, imageService service.ImageService, healthService service.HealthService, statisticsService models.StatisticsService) *Router {
 	// Set Gin mode based on config
 	if cfg.IsDevelopment() {
 		gin.SetMode(gin.DebugMode)
@@ -33,13 +35,15 @@ func NewRouter(cfg *config.Config, imageService service.ImageService, healthServ
 	imageHandler := handlers.NewImageHandler(imageService, cfg)
 	healthHandler := handlers.NewHealthHandler(healthService)
 	authHandler := handlers.NewAuthHandler(cfg)
+	statisticsHandler := handlers.NewStatisticsHandler(statisticsService)
 
 	router := &Router{
-		engine:        engine,
-		config:        cfg,
-		imageHandler:  imageHandler,
-		healthHandler: healthHandler,
-		authHandler:   authHandler,
+		engine:            engine,
+		config:            cfg,
+		imageHandler:      imageHandler,
+		healthHandler:     healthHandler,
+		authHandler:       authHandler,
+		statisticsHandler: statisticsHandler,
 	}
 
 	// Setup middleware and routes
@@ -104,6 +108,17 @@ func (r *Router) setupRoutes() {
 			// Delete operations (require read-write permission)
 			images.DELETE("/:id", middleware.RequirePermission(middleware.PermissionReadWrite), r.imageHandler.Delete)
 			images.DELETE("/:id/:resolution", middleware.RequirePermission(middleware.PermissionReadWrite), r.imageHandler.DeleteResolution)
+		}
+
+		// Statistics endpoints (require read permission)
+		statistics := v1.Group("/statistics")
+		statistics.Use(middleware.APIKeyAuth(r.config))
+		{
+			statistics.GET("", middleware.RequirePermission(middleware.PermissionRead), r.statisticsHandler.GetComprehensiveStatistics)
+			statistics.GET("/images", middleware.RequirePermission(middleware.PermissionRead), r.statisticsHandler.GetImageStatistics)
+			statistics.GET("/storage", middleware.RequirePermission(middleware.PermissionRead), r.statisticsHandler.GetStorageStatistics)
+			statistics.GET("/deduplication", middleware.RequirePermission(middleware.PermissionRead), r.statisticsHandler.GetDeduplicationStatistics)
+			statistics.POST("/refresh", middleware.RequirePermission(middleware.PermissionReadWrite), r.statisticsHandler.RefreshStatistics)
 		}
 	}
 

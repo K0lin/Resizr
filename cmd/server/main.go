@@ -103,10 +103,11 @@ func run() error {
 
 	imageService := service.NewImageService(repo, dedupRepo, store, processor, cfg)
 	healthService := service.NewHealthService(repo, store, cfg, AppVersion)
+	statisticsService := service.NewStatisticsService(repo, dedupRepo, store, cfg)
 
 	// Initialize API router
 	logger.Info("Initializing API router...")
-	router := api.NewRouter(cfg, imageService, healthService)
+	router := api.NewRouter(cfg, imageService, healthService, statisticsService)
 
 	// Create HTTP server
 	server := &http.Server{

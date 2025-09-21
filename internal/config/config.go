@@ -12,17 +12,18 @@ import (
 
 // Config holds all application configuration
 type Config struct {
-	Server    ServerConfig
-	Redis     RedisConfig
-	Cache     CacheConfig
-	S3        S3Config
-	Image     ImageConfig
-	RateLimit RateLimitConfig
-	Logger    LoggerConfig
-	CORS      CORSConfig
-	Canvas    CanvasConfig
-	Health    HealthConfig
-	Auth      AuthConfig
+	Server     ServerConfig
+	Redis      RedisConfig
+	Cache      CacheConfig
+	S3         S3Config
+	Image      ImageConfig
+	RateLimit  RateLimitConfig
+	Logger     LoggerConfig
+	CORS       CORSConfig
+	Canvas     CanvasConfig
+	Health     HealthConfig
+	Auth       AuthConfig
+	Statistics StatisticsConfig
 }
 
 // ServerConfig holds HTTP server configuration
@@ -121,6 +122,12 @@ type AuthConfig struct {
 	KeyHeader     string   // HTTP header name for API key
 }
 
+// StatisticsConfig holds statistics caching configuration
+type StatisticsConfig struct {
+	CacheEnabled bool          // Enable/disable statistics caching
+	CacheTTL     time.Duration // TTL for cached statistics
+}
+
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
 	// Load .env file if it exists (for development)
@@ -193,6 +200,10 @@ func Load() (*Config, error) {
 			ReadWriteKeys: getEnvStringSlice("AUTH_READWRITE_KEYS", []string{}),
 			ReadOnlyKeys:  getEnvStringSlice("AUTH_READONLY_KEYS", []string{}),
 			KeyHeader:     getEnv("AUTH_KEY_HEADER", "X-API-Key"),
+		},
+		Statistics: StatisticsConfig{
+			CacheEnabled: getEnvBool("STATISTICS_CACHE_ENABLED", true),
+			CacheTTL:     time.Duration(getEnvInt("STATISTICS_CACHE_TTL", 300)) * time.Second,
 		},
 	}
 

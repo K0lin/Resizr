@@ -82,6 +82,8 @@ tags:
     description: API key generation and authentication status
   - name: Images
     description: Image upload, processing, and delivery operations
+  - name: Statistics
+    description: System statistics and monitoring metrics
   - name: Health
     description: Service health and monitoring endpoints
 
@@ -781,7 +783,6 @@ paths:
                 deduplication:
                   enabled: true
                   total_shared_resolutions: 1250
-                  storage_saved_mb: 450.5
                   average_references_per_resolution: 2.3
                   total_deduplicated_images: 2875
                   deduplication_ratio: 0.68
@@ -801,10 +802,216 @@ paths:
                 deduplication:
                   enabled: true
                   total_shared_resolutions: 1250
-                  storage_saved_mb: 450.5
                   average_references_per_resolution: 2.3
                   total_deduplicated_images: 2875
                   deduplication_ratio: 0.68
+
+  /api/v1/statistics:
+    get:
+      tags:
+        - Statistics
+      summary: Get comprehensive system statistics
+      description: |
+        Retrieve comprehensive statistics about the RESIZR service including images, storage, deduplication, and performance metrics.
+
+        **Statistics Include:**
+        - Total images and resolutions count
+        - Storage utilization and savings from deduplication
+        - Deduplication effectiveness metrics
+        - Performance metrics (processing times, cache hit rates)
+        - System resource utilization
+
+        Results are cached for improved performance with configurable TTL.
+
+      operationId: getComprehensiveStatistics
+      parameters:
+        - name: detailed
+          in: query
+          description: Include detailed breakdown of statistics
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - name: performance
+          in: query
+          description: Include performance metrics
+          required: false
+          schema:
+            type: boolean
+            default: true
+        - name: system
+          in: query
+          description: Include system metrics
+          required: false
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Comprehensive statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResizrStatistics'
+              example:
+                image_stats:
+                  total_images: 15420
+                  total_resolutions: 52340
+                  average_resolutions_per_image: 3.4
+                  image_breakdown:
+                    jpeg: 12336
+                    png: 2584
+                    webp: 500
+                storage_stats:
+                  total_storage_bytes: 15728640000
+                  original_storage_bytes: 8589934592
+                  resized_storage_bytes: 7138705408
+                  storage_efficiency_ratio: 0.86
+                deduplication_stats:
+                  enabled: true
+                  total_shared_resolutions: 8520
+                  deduplication_ratio: 0.72
+                  average_references_per_resolution: 2.8
+                system_stats:
+                  uptime_seconds: 2592000
+                  memory_usage_mb: 512.8
+                  cpu_usage_percent: 15.2
+                  goroutines_active: 45
+                  storage_available_bytes: 1099511627776
+                cache_info:
+                  cached: true
+                  cache_age_seconds: 120
+                  ttl_seconds: 300
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/statistics/images:
+    get:
+      tags:
+        - Statistics
+      summary: Get image-specific statistics
+      description: |
+        Retrieve statistics specifically about images in the system.
+
+        **Image Statistics Include:**
+        - Total image count
+        - Total resolutions count
+        - Average resolutions per image
+        - Breakdown by image format
+
+      operationId: getImageStatistics
+      responses:
+        '200':
+          description: Image statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageStats'
+              example:
+                total_images: 15420
+                total_resolutions: 52340
+                average_resolutions_per_image: 3.4
+                image_breakdown:
+                  jpeg: 12336
+                  png: 2584
+                  webp: 500
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/statistics/storage:
+    get:
+      tags:
+        - Statistics
+      summary: Get storage-specific statistics
+      description: |
+        Retrieve statistics about storage utilization and efficiency.
+
+        **Storage Statistics Include:**
+        - Total storage usage
+        - Original vs resized storage breakdown
+        - Storage savings from deduplication
+        - Storage efficiency ratios
+
+      operationId: getStorageStatistics
+      responses:
+        '200':
+          description: Storage statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageStats'
+              example:
+                total_storage_bytes: 15728640000
+                original_storage_bytes: 8589934592
+                resized_storage_bytes: 7138705408
+                storage_efficiency_ratio: 0.86
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/statistics/deduplication:
+    get:
+      tags:
+        - Statistics
+      summary: Get deduplication-specific statistics
+      description: |
+        Retrieve statistics about the deduplication system effectiveness.
+
+        **Deduplication Statistics Include:**
+        - Deduplication enabled status
+        - Total shared resolutions
+        - Deduplication ratio
+        - Storage savings from deduplication
+        - Average references per resolution
+
+      operationId: getDeduplicationStatistics
+      responses:
+        '200':
+          description: Deduplication statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeduplicationStats'
+              example:
+                enabled: true
+                total_shared_resolutions: 8520
+                deduplication_ratio: 0.72
+                average_references_per_resolution: 2.8
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+
+  /api/v1/statistics/refresh:
+    post:
+      tags:
+        - Statistics
+      summary: Refresh statistics cache
+      description: |
+        Force refresh the statistics cache by clearing existing cached data.
+        The next statistics request will fetch fresh data from all sources.
+
+        **Use Cases:**
+        - Force immediate update after bulk operations
+        - Refresh data for critical monitoring
+        - Clear potentially stale cache data
+
+      operationId: refreshStatisticsCache
+      responses:
+        '200':
+          description: Statistics cache refreshed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Statistics cache refreshed successfully"
+                  timestamp:
+                    type: string
+                    format: date-time
+                    example: "2025-09-20T15:30:45Z"
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /debug/vars:
     get:
@@ -1146,11 +1353,6 @@ components:
               type: integer
               description: Total number of shared resolution files
               example: 1250
-            storage_saved_mb:
-              type: number
-              format: float
-              description: Estimated storage saved in megabytes
-              example: 450.5
             average_references_per_resolution:
               type: number
               format: float
@@ -1226,6 +1428,164 @@ components:
           type: integer
           description: HTTP status code
           example: 400
+
+    ResizrStatistics:
+      type: object
+      description: Comprehensive system statistics
+      required:
+        - image_stats
+        - storage_stats
+        - deduplication_stats
+        - cache_info
+      properties:
+        image_stats:
+          $ref: '#/components/schemas/ImageStats'
+        storage_stats:
+          $ref: '#/components/schemas/StorageStats'
+        deduplication_stats:
+          $ref: '#/components/schemas/DeduplicationStats'
+        system_stats:
+          $ref: '#/components/schemas/SystemStats'
+        cache_info:
+          $ref: '#/components/schemas/CacheInfo'
+
+    ImageStats:
+      type: object
+      description: Image-related statistics
+      required:
+        - total_images
+        - total_resolutions
+        - average_resolutions_per_image
+      properties:
+        total_images:
+          type: integer
+          description: Total number of images stored
+          example: 15420
+        total_resolutions:
+          type: integer
+          description: Total number of resolutions stored across all images
+          example: 52340
+        average_resolutions_per_image:
+          type: number
+          format: float
+          description: Average number of resolutions per image
+          example: 3.4
+        image_breakdown:
+          type: object
+          description: Breakdown of images by format
+          additionalProperties:
+            type: integer
+          example:
+            jpeg: 12336
+            png: 2584
+            webp: 500
+
+    StorageStats:
+      type: object
+      description: Storage utilization statistics
+      required:
+        - total_storage_bytes
+        - original_storage_bytes
+        - resized_storage_bytes
+      properties:
+        total_storage_bytes:
+          type: integer
+          format: int64
+          description: Total storage used by all images in bytes
+          example: 15728640000
+        original_storage_bytes:
+          type: integer
+          format: int64
+          description: Storage used by original images in bytes
+          example: 8589934592
+        resized_storage_bytes:
+          type: integer
+          format: int64
+          description: Storage used by resized images in bytes
+          example: 7138705408
+        storage_efficiency_ratio:
+          type: number
+          format: float
+          description: Storage efficiency ratio (0.0 to 1.0)
+          example: 0.86
+
+    DeduplicationStats:
+      type: object
+      description: Deduplication system statistics
+      required:
+        - enabled
+        - total_shared_resolutions
+        - deduplication_ratio
+      properties:
+        enabled:
+          type: boolean
+          description: Whether deduplication is enabled
+          example: true
+        total_shared_resolutions:
+          type: integer
+          description: Total number of shared resolutions
+          example: 8520
+        deduplication_ratio:
+          type: number
+          format: float
+          description: Deduplication effectiveness ratio (0.0 to 1.0)
+          example: 0.72
+        average_references_per_resolution:
+          type: number
+          format: float
+          description: Average number of references per shared resolution
+          example: 2.8
+
+
+    SystemStats:
+      type: object
+      description: System resource utilization statistics
+      properties:
+        uptime_seconds:
+          type: integer
+          format: int64
+          description: System uptime in seconds
+          example: 2592000
+        memory_usage_mb:
+          type: number
+          format: float
+          description: Current memory usage in MB
+          example: 512.8
+        cpu_usage_percent:
+          type: number
+          format: float
+          description: Current CPU usage percentage
+          example: 15.2
+        goroutines_active:
+          type: integer
+          description: Number of active goroutines
+          example: 45
+        storage_available_bytes:
+          type: integer
+          format: int64
+          description: Available storage space in bytes
+          example: 1099511627776
+
+    CacheInfo:
+      type: object
+      description: Cache information for statistics
+      required:
+        - cached
+        - cache_age_seconds
+        - ttl_seconds
+      properties:
+        cached:
+          type: boolean
+          description: Whether the data is served from cache
+          example: true
+        cache_age_seconds:
+          type: integer
+          description: Age of cached data in seconds
+          example: 120
+        ttl_seconds:
+          type: integer
+          description: Cache TTL in seconds
+          example: 300
 
   responses:
     BadRequest:
