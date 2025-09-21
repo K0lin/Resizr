@@ -278,6 +278,7 @@ func (s *ImageServiceImpl) ProcessUpload(ctx context.Context, input UploadInput)
 			}
 		}
 
+		var processingSucceeded = true
 		if shouldProcess {
 			if err := s.processResolutionWithMetadata(ctx, imageID, resolutionName, input.Data, mimeType, metadata); err != nil {
 				logger.ErrorWithContext(ctx, "Failed to process resolution",
@@ -285,12 +286,18 @@ func (s *ImageServiceImpl) ProcessUpload(ctx context.Context, input UploadInput)
 					zap.String("resolution", resolutionName),
 					zap.Error(err))
 				// Continue with other resolutions instead of failing completely
-				continue
+				processingSucceeded = false
 			}
 		}
 
-		metadata.AddResolution(resolutionName)
-		processedResolutions = append(processedResolutions, resolutionName)
+		// Only add to metadata and processed list if processing succeeded (or wasn't needed)
+		if processingSucceeded {
+			metadata.AddResolution(resolutionName)
+			processedResolutions = append(processedResolutions, resolutionName)
+		} else {
+			// Skip adding to deduplication tracking if processing failed
+			continue
+		}
 
 		// Add resolution reference for deduplication tracking
 		if metadata.IsDeduped {
@@ -1034,12 +1041,27 @@ func (s *ImageServiceImpl) processResolutionWithMetadata(ctx context.Context, im
 		}
 	}
 
+	// Convert MIME type to format string for processor
+	format := ""
+	switch mimeType {
+	case "image/jpeg":
+		format = "jpeg"
+	case "image/png":
+		format = "png"
+	case "image/gif":
+		format = "gif"
+	case "image/webp":
+		format = "webp"
+	default:
+		format = "jpeg" // fallback to JPEG
+	}
+
 	// Configure resize parameters
 	resizeConfig := ResizeConfig{
 		Width:           resolutionConfig.Width,
 		Height:          resolutionConfig.Height,
 		Quality:         s.config.Image.Quality,
-		Format:          mimeType,
+		Format:          format,
 		Mode:            ResizeMode(s.config.Image.ResizeMode),
 		BackgroundColor: s.config.Canvas.BackgroundColor,
 	}
