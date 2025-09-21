@@ -967,3 +967,126 @@ func TestImageService_DeleteResolution(t *testing.T) {
 		assert.ErrorAs(t, err, &validationErr)
 	})
 }
+
+func TestImageService_GenerateUniqueImageID(t *testing.T) {
+	t.Run("generates unique UUID on first attempt", func(t *testing.T) {
+		mockRepo := &testutil.MockImageRepository{
+			ExistsFunc: func(ctx context.Context, id string) (bool, error) {
+				return false, nil // UUID doesn't exist, so it's unique
+			},
+		}
+
+		service := &ImageServiceImpl{repo: mockRepo}
+
+		imageID, err := service.generateUniqueImageID(context.Background())
+
+		assert.NoError(t, err)
+		assert.NotEmpty(t, imageID)
+		assert.Len(t, imageID, 36) // Standard UUID length with hyphens
+	})
+
+	t.Run("handles UUID collision and regenerates", func(t *testing.T) {
+		callCount := 0
+		mockRepo := &testutil.MockImageRepository{
+			ExistsFunc: func(ctx context.Context, id string) (bool, error) {
+				callCount++
+				if callCount <= 2 {
+					return true, nil // First two UUIDs collide
+				}
+				return false, nil // Third UUID is unique
+			},
+		}
+
+		service := &ImageServiceImpl{repo: mockRepo}
+
+		imageID, err := service.generateUniqueImageID(context.Background())
+
+		assert.NoError(t, err)
+		assert.NotEmpty(t, imageID)
+		assert.Equal(t, 3, callCount) // Should have tried 3 times
+	})
+
+	t.Run("fails after max attempts", func(t *testing.T) {
+		mockRepo := &testutil.MockImageRepository{
+			ExistsFunc: func(ctx context.Context, id string) (bool, error) {
+				return true, nil // All UUIDs collide
+			},
+		}
+
+		service := &ImageServiceImpl{repo: mockRepo}
+
+		imageID, err := service.generateUniqueImageID(context.Background())
+
+		assert.Error(t, err)
+		assert.Empty(t, imageID)
+		assert.Contains(t, err.Error(), "failed to generate unique UUID after 10 attempts")
+	})
+
+	t.Run("handles repository error", func(t *testing.T) {
+		mockRepo := &testutil.MockImageRepository{
+			ExistsFunc: func(ctx context.Context, id string) (bool, error) {
+				return false, errors.New("database connection failed")
+			},
+		}
+
+		service := &ImageServiceImpl{repo: mockRepo}
+
+		imageID, err := service.generateUniqueImageID(context.Background())
+
+		assert.Error(t, err)
+		assert.Empty(t, imageID)
+		assert.Contains(t, err.Error(), "failed to check UUID existence")
+	})
+}
+
+func TestImageService_ProcessUpload_WithUUIDCollisionDetection(t *testing.T) {
+	t.Run("upload succeeds with UUID collision detection", func(t *testing.T) {
+		callCount := 0
+		mockRepo := &testutil.MockImageRepository{
+			ExistsFunc: func(ctx context.Context, id string) (bool, error) {
+				callCount++
+				if callCount == 1 {
+					return true, nil // First UUID collides
+				}
+				return false, nil // Second UUID is unique
+			},
+			StoreFunc: func(ctx context.Context, img *models.ImageMetadata) error {
+				return nil
+			},
+		}
+
+		mockDeduplicationRepo := &testutil.MockDeduplicationRepository{
+			FindImageByHashFunc: func(ctx context.Context, hash models.ImageHash) (*models.DeduplicationInfo, error) {
+				return nil, models.NotFoundError{Resource: "deduplication_info", ID: hash.String()}
+			},
+			StoreDeduplicationInfoFunc: func(ctx context.Context, info *models.DeduplicationInfo) error {
+				return nil
+			},
+		}
+
+		mockStorage := &testutil.MockStorageProvider{
+			UploadFunc: func(ctx context.Context, key string, data io.Reader, contentType string) error {
+				return nil
+			},
+		}
+
+		mockProcessor := &testProcessorService{}
+
+		service := NewImageService(mockRepo, mockDeduplicationRepo, mockStorage, mockProcessor, testConfig())
+
+		testData := testutil.CreateTestImageData()
+		input := UploadInput{
+			Filename:    "test.jpg",
+			Data:        testData,
+			Size:        int64(len(testData)),
+			Resolutions: []string{},
+		}
+
+		result, err := service.ProcessUpload(context.Background(), input)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.NotEmpty(t, result.ImageID)
+		assert.Equal(t, 2, callCount) // Should have checked existence twice due to collision
+	})
+}
