@@ -432,7 +432,6 @@ func IsValidDimensionFormat(resolution string) bool {
 	return resolutionRegex.MatchString(resolution)
 }
 
-
 // IsSafeDimensionString ensures a dimension string is safe for use as a path component
 func IsSafeDimensionString(dim string) bool {
 	// Must match strictly "[0-9]+x[0-9]+", and not contain any '/','\','..'
@@ -464,7 +463,7 @@ func NewImageMetadata(id, filename, mimeType string, size int64, width, height i
 		Size:          size,
 		Width:         width,
 		Height:        height,
-		Resolutions:   []string{},
+		Resolutions:   nil,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 		Hash:          ImageHash{}, // Will be set later
