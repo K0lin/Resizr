@@ -15,6 +15,7 @@ type Config struct {
 	Server     ServerConfig
 	Redis      RedisConfig
 	Cache      CacheConfig
+	Storage    StorageConfig
 	S3         S3Config
 	Image      ImageConfig
 	RateLimit  RateLimitConfig
@@ -39,6 +40,12 @@ type RedisConfig struct {
 	DB       int
 	PoolSize int
 	Timeout  time.Duration
+}
+
+// StorageConfig holds storage configuration
+type StorageConfig struct {
+	Provider  string // Storage provider: "s3" or "local"
+	Directory string // Directory for local storage (only used when provider=local)
 }
 
 // S3Config holds S3 storage configuration
@@ -150,6 +157,10 @@ func Load() (*Config, error) {
 			Directory: getEnv("CACHE_DIRECTORY", "./data/cache"),
 			TTL:       time.Duration(getEnvInt("CACHE_TTL", 3600)) * time.Second,
 		},
+		Storage: StorageConfig{
+			Provider:  getEnv("STORAGE_PROVIDER", "s3"),
+			Directory: getEnv("STORAGE_DIRECTORY", "./data/storage"),
+		},
 		S3: S3Config{
 			Endpoint:  getEnv("S3_ENDPOINT", "https://s3.amazonaws.com"),
 			AccessKey: getEnv("S3_ACCESS_KEY", ""),
@@ -217,15 +228,27 @@ func Load() (*Config, error) {
 
 // Validate validates the configuration
 func (c *Config) Validate() error {
+	// Validate Storage configuration
+	validStorageProviders := []string{"s3", "local"}
+	if !contains(validStorageProviders, c.Storage.Provider) {
+		return fmt.Errorf("STORAGE_PROVIDER must be one of: %s", strings.Join(validStorageProviders, ", "))
+	}
+
+	if c.Storage.Provider == "local" && c.Storage.Directory == "" {
+		return fmt.Errorf("STORAGE_DIRECTORY is required when STORAGE_PROVIDER=local")
+	}
+
 	// Validate S3 configuration
-	if c.S3.Bucket == "" {
-		return fmt.Errorf("S3_BUCKET is required")
-	}
-	if c.S3.AccessKey == "" {
-		return fmt.Errorf("S3_ACCESS_KEY is required")
-	}
-	if c.S3.SecretKey == "" {
-		return fmt.Errorf("S3_SECRET_KEY is required")
+	if c.Storage.Provider == "s3" {
+		if c.S3.Bucket == "" {
+			return fmt.Errorf("S3_BUCKET is required")
+		}
+		if c.S3.AccessKey == "" {
+			return fmt.Errorf("S3_ACCESS_KEY is required")
+		}
+		if c.S3.SecretKey == "" {
+			return fmt.Errorf("S3_SECRET_KEY is required")
+		}
 	}
 
 	// Validate server configuration

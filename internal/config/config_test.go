@@ -150,6 +150,9 @@ func TestValidate_Success(t *testing.T) {
 			Port:    "8080",
 			GinMode: "release",
 		},
+		Storage: StorageConfig{
+			Provider: "s3",
+		},
 		Cache: CacheConfig{
 			Type: "redis",
 		},
@@ -183,6 +186,22 @@ func TestValidate_Success(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestValidate_Success_Local(t *testing.T) {
+	config := createValidConfig()
+	config.Storage.Provider = "local"
+	config.Storage.Directory = "/data/storage"
+
+	// When using local storage, S3 config is not required
+	config.S3 = S3Config{}
+
+	// When using local storage, cache can be badger
+	config.Cache.Type = "badger"
+	config.Cache.Directory = "/data/cache"
+
+	err := config.Validate()
+	assert.NoError(t, err)
+}
+
 func TestValidate_MissingS3Config(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -192,6 +211,9 @@ func TestValidate_MissingS3Config(t *testing.T) {
 		{
 			name: "missing bucket",
 			config: &Config{
+				Storage: StorageConfig{
+					Provider: "s3",
+				},
 				S3: S3Config{
 					AccessKey: "key",
 					SecretKey: "secret",
@@ -203,6 +225,9 @@ func TestValidate_MissingS3Config(t *testing.T) {
 		{
 			name: "missing access key",
 			config: &Config{
+				Storage: StorageConfig{
+					Provider: "s3",
+				},
 				S3: S3Config{
 					AccessKey: "", // Missing
 					SecretKey: "secret",
@@ -214,6 +239,9 @@ func TestValidate_MissingS3Config(t *testing.T) {
 		{
 			name: "missing secret key",
 			config: &Config{
+				Storage: StorageConfig{
+					Provider: "s3",
+				},
 				S3: S3Config{
 					AccessKey: "key",
 					SecretKey: "", // Missing
@@ -240,8 +268,13 @@ func TestValidate_MissingS3Config(t *testing.T) {
 			tt.config.RateLimit.Info = 50
 			tt.config.Logger.Level = "info"
 			tt.config.Logger.Format = "json"
+			// Create a valid base config and merge the test-specific S3 config
+			baseConfig := createValidConfig()
+			baseConfig.S3 = tt.config.S3
+			baseConfig.Storage = tt.config.Storage
 
 			err := tt.config.Validate()
+			err := baseConfig.Validate()
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), tt.errMsg)
 		})
@@ -661,6 +694,41 @@ func TestResolutionConfig(t *testing.T) {
 	assert.Equal(t, 600, config.Height)
 }
 
+func TestValidate_StorageConfig(t *testing.T) {
+	tests := []struct {
+		name   string
+		modify func(*Config)
+		errMsg string
+	}{
+		{
+			name: "invalid storage provider",
+			modify: func(c *Config) {
+				c.Storage.Provider = "invalid"
+			},
+			errMsg: "STORAGE_PROVIDER must be one of",
+		},
+		{
+			name: "missing storage directory when provider is local",
+			modify: func(c *Config) {
+				c.Storage.Provider = "local"
+				c.Storage.Directory = ""
+			},
+			errMsg: "STORAGE_DIRECTORY is required when STORAGE_PROVIDER=local",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := createValidConfig()
+			tt.modify(config)
+
+			err := config.Validate()
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errMsg)
+		})
+	}
+}
+
 // Helper functions
 
 func createValidConfig() *Config {
@@ -668,6 +736,9 @@ func createValidConfig() *Config {
 		Server: ServerConfig{
 			Port:    "8080",
 			GinMode: "release",
+		},
+		Storage: StorageConfig{
+			Provider: "s3",
 		},
 		Cache: CacheConfig{
 			Type: "redis",
