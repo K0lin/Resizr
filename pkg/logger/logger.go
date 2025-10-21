@@ -27,7 +27,7 @@ const (
 // Initialize logger with config
 func Init(config Config) error {
 	// Parse log level
-	level := zapcore.InfoLevel
+	var level zapcore.Level
 	switch config.Level {
 	case "debug":
 		level = zapcore.DebugLevel

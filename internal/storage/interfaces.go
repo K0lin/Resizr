@@ -156,11 +156,3 @@ type BatchResult struct {
 
 // StorageProvider represents different storage providers
 type StorageProvider string
-
-const (
-	_ProviderS3    StorageProvider = "s3"
-	_ProviderGCS   StorageProvider = "gcs"
-	_ProviderAzure StorageProvider = "azure"
-	_ProviderMinIO StorageProvider = "minio"
-	_ProviderLocal StorageProvider = "local"
-)

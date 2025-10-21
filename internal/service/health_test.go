@@ -541,19 +541,6 @@ func TestHealthService_Version(t *testing.T) {
 	}
 }
 
-// MockImageRepository extension to add GetStats
-type _MockImageRepositoryWithStats struct {
-	*mockImageRepository
-	GetStatsFunc func(ctx context.Context) (*RepositoryStats, error)
-}
-
-func (m *_MockImageRepositoryWithStats) GetStats(ctx context.Context) (*RepositoryStats, error) {
-	if m.GetStatsFunc != nil {
-		return m.GetStatsFunc(ctx)
-	}
-	return &RepositoryStats{}, nil
-}
-
 func TestRepositoryStats_Struct(t *testing.T) {
 	stats := &RepositoryStats{
 		TotalImages: 100,
