@@ -27,7 +27,6 @@ type RateLimiter struct {
 	stopCleanup chan struct{}
 }
 
-
 var (
 	globalRateLimiter *RateLimiter
 	once              sync.Once
