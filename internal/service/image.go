@@ -1154,6 +1154,18 @@ func (s *ImageServiceImpl) processResolutionWithMetadata(ctx context.Context, im
 
 // ...existing code...
 
+// isSafePathComponent validates that a string is safe to use as a path component (filename segment)
+func isSafePathComponent(component string) bool {
+	if component == "" ||
+		strings.Contains(component, "/") ||
+		strings.Contains(component, "\\") ||
+		strings.Contains(component, "..") ||
+		strings.HasPrefix(component, ".") {
+		return false
+	}
+	return true
+}
+
 // cleanupUploadedImages cleans up images if upload fails
 func (s *ImageServiceImpl) cleanupUploadedImages(ctx context.Context, imageID string, resolutions []string) {
 	logger.WarnWithContext(ctx, "Cleaning up uploaded images due to failure",
@@ -1161,6 +1173,12 @@ func (s *ImageServiceImpl) cleanupUploadedImages(ctx context.Context, imageID st
 		zap.Strings("resolutions", resolutions))
 
 	for _, resolution := range resolutions {
+		if !isSafePathComponent(resolution) {
+			logger.ErrorWithContext(ctx, "Unsafe resolution name detected during cleanup, skipping",
+				zap.String("image_id", imageID),
+				zap.String("resolution", resolution))
+			continue
+		}
 		storageKey := fmt.Sprintf("images/%s/%s.jpg", imageID, resolution) // Simplified
 		if err := s.storage.Delete(ctx, storageKey); err != nil {
 			logger.ErrorWithContext(ctx, "Failed to cleanup uploaded image",
