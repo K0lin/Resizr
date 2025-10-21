@@ -108,7 +108,7 @@ func (s *LocalStorage) Delete(ctx context.Context, key string) error {
 func (s *LocalStorage) DeleteFolder(ctx context.Context, prefix string) error {
 	path := filepath.Join(s.directory, prefix)
 
-	// Validate that the resulting path is within the storage directory
+	// Validate that the resulting path is strictly within the storage directory and not the directory itself
 	absRoot, err := filepath.Abs(s.directory)
 	if err != nil {
 		return fmt.Errorf("failed to resolve storage directory: %w", err)
@@ -117,11 +117,15 @@ func (s *LocalStorage) DeleteFolder(ctx context.Context, prefix string) error {
 	if err != nil {
 		return fmt.Errorf("failed to resolve target path: %w", err)
 	}
-	if absPath == absRoot || !strings.HasPrefix(absPath+string(os.PathSeparator), absRoot+string(os.PathSeparator)) {
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return fmt.Errorf("failed to compute relative path: %w", err)
+	}
+	if rel == "." || strings.HasPrefix(rel, "..") {
 		return fmt.Errorf("invalid path: %q escapes from storage root", prefix)
 	}
 
-	err = os.RemoveAll(path)
+	err = os.RemoveAll(absPath)
 	if err != nil {
 		return fmt.Errorf("failed to delete folder: %w", err)
 	}
