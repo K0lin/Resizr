@@ -1127,6 +1127,13 @@ func (s *ImageServiceImpl) processResolutionWithMetadata(ctx context.Context, im
 	// Upload processed image using dimensions-only storage key (no aliases)
 	// This ensures no duplicate files are stored and uses shared storage for deduplicated images
 	dimensions := models.ExtractDimensions(resolutionName)
+	// Validate that dimensions string is safe for filesystem path
+	if !models.IsSafeDimensionString(dimensions) {
+		return models.ValidationError{
+			Field:   "resolution",
+			Message: fmt.Sprintf("Bad resolution dimensions: %q", dimensions),
+		}
+	}
 	storageKey := fmt.Sprintf("images/%s/%s.%s", storageImageID, dimensions, models.GetExtensionFromMimeType(mimeType))
 	if err := s.storage.Upload(ctx, storageKey, bytes.NewReader(processedData), int64(len(processedData)), mimeType); err != nil {
 		return models.StorageError{
