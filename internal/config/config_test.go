@@ -273,7 +273,6 @@ func TestValidate_MissingS3Config(t *testing.T) {
 			baseConfig.S3 = tt.config.S3
 			baseConfig.Storage = tt.config.Storage
 
-			err := tt.config.Validate()
 			err := baseConfig.Validate()
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), tt.errMsg)
