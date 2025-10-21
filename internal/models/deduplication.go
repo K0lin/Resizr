@@ -44,7 +44,6 @@ func CalculateImageHash(data []byte) ImageHash {
 	}
 }
 
-
 // Equals compares two ImageHash instances
 func (ih ImageHash) Equals(other ImageHash) bool {
 	return ih.Algorithm == other.Algorithm &&
