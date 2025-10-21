@@ -69,11 +69,19 @@ func run() error {
 		}
 	}()
 
-	// Initialize storage (S3)
-	logger.Info("Initializing S3 storage...")
-	store, err := storage.NewS3Storage(&cfg.S3)
+	// Initialize storage
+	logger.Info("Initializing storage...")
+	var store storage.ImageStorage
+	switch cfg.Storage.Provider {
+	case "s3":
+		store, err = storage.NewS3Storage(&cfg.S3)
+	case "local":
+		store, err = storage.NewLocalStorage(cfg.Storage.Directory)
+	default:
+		return fmt.Errorf("unsupported storage provider: %s", cfg.Storage.Provider)
+	}
 	if err != nil {
-		logger.Fatal("Failed to initialize S3 storage", zap.Error(err))
+		logger.Fatal("Failed to initialize storage", zap.Error(err))
 		return fmt.Errorf("failed to initialize storage: %w", err)
 	}
 

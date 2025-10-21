@@ -26,7 +26,9 @@
 ### Prerequisites
 
 - **Go 1.25+** - [Download Go](https://golang.org/dl/)
-- **S3-Compatible Storage** - AWS S3 or MinIO for image storage
+- **Storage Backend** (choose one):
+  - **S3-Compatible Storage** - AWS S3 or MinIO for image storage (when `STORAGE_PROVIDER=s3`)
+  - **Local Filesystem** - For development or single-node deployments (when `STORAGE_PROVIDER=local`)
 - **Cache Backend** (choose one):
   - **Redis 6.0+** - When using `CACHE_TYPE=redis` (default)
   - **File system** - When using `CACHE_TYPE=badger` (no external dependencies)
@@ -62,6 +64,10 @@ GIN_MODE=release             # Gin framework mode (debug/release/test)
 LOG_LEVEL=info               # Log level (debug/info/warn/error)
 LOG_FORMAT=json              # Log format (json/console)
 
+# Storage Configuration
+STORAGE_PROVIDER=s3          # Storage provider: "s3" or "local"
+STORAGE_DIRECTORY=./data/storage # Directory for local storage (only used when STORAGE_PROVIDER=local)
+
 # Cache Configuration
 CACHE_TYPE=redis                    # Cache backend: redis or badger
 CACHE_DIRECTORY=./data/cache        # Directory for BadgerDB (only used when CACHE_TYPE=badger)
@@ -74,7 +80,7 @@ REDIS_DB=0                   # Redis database number (0-15)
 REDIS_POOL_SIZE=10           # Connection pool size for Redis
 REDIS_TIMEOUT=5              # Connection timeout in seconds
 
-# S3 Storage Configuration
+# S3 Storage Configuration (only required when STORAGE_PROVIDER=s3)
 S3_ENDPOINT=https://s3.amazonaws.com  # S3 endpoint URL
 S3_ACCESS_KEY=your_access_key         # S3 access key ID
 S3_SECRET_KEY=your_secret_key         # S3 secret access key
