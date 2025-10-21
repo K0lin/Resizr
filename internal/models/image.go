@@ -432,6 +432,19 @@ func IsValidDimensionFormat(resolution string) bool {
 	return resolutionRegex.MatchString(resolution)
 }
 
+
+// IsSafeDimensionString ensures a dimension string is safe for use as a path component
+func IsSafeDimensionString(dim string) bool {
+	// Must match strictly "[0-9]+x[0-9]+", and not contain any '/','\','..'
+	if !IsValidDimensionFormat(dim) {
+		return false
+	}
+	if strings.Contains(dim, "/") || strings.Contains(dim, "\\") || strings.Contains(dim, "..") {
+		return false
+	}
+	return true
+}
+
 // FormatResolutionWithAlias creates a resolution string with alias if provided
 func FormatResolutionWithAlias(width, height int, alias string) string {
 	if alias != "" {
