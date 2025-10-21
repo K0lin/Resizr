@@ -932,11 +932,6 @@ func (r *RedisRepository) GetImageStatistics(ctx context.Context) (*models.Image
 		topResolutions = topResolutions[:10]
 	}
 
-	// Handle edge case for smallest size
-	if smallestSize == -1 {
-		smallestSize = 0
-	}
-
 	// Calculate total resolutions
 	var totalResolutions int64
 	for _, count := range resolutionCounts {

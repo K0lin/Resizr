@@ -27,11 +27,6 @@ type RateLimiter struct {
 	stopCleanup chan struct{}
 }
 
-// ClientLimiter holds rate limiter info for a client
-type ClientLimiter struct {
-	limiter  *rate.Limiter
-	lastSeen time.Time
-}
 
 var (
 	globalRateLimiter *RateLimiter

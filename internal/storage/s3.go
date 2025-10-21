@@ -204,9 +204,7 @@ func (s *S3Storage) DeleteFolder(ctx context.Context, prefix string) error {
 
 	// Extract base endpoint from S3 endpoint
 	baseEndpoint := strings.TrimSuffix(s.config.Endpoint, "/")
-	if strings.HasSuffix(baseEndpoint, "/s3") {
-		baseEndpoint = strings.TrimSuffix(baseEndpoint, "/s3")
-	}
+	baseEndpoint = strings.TrimSuffix(baseEndpoint, "/s3")
 
 	// Build custom API URL for recursive folder deletion
 	// Format: https://s3.site/api/v1/buckets/{bucket}/objects?prefix={prefix}&recursive=true

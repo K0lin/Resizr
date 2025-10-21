@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 )
 
 // ImageHash represents a hash of image content for deduplication
@@ -45,17 +44,6 @@ func CalculateImageHash(data []byte) ImageHash {
 	}
 }
 
-// CalculateImageHashFromReader calculates SHA-256 hash from io.Reader
-func _CalculateImageHashFromReader(reader io.Reader) (ImageHash, []byte, error) {
-	// Read all data to calculate hash and return data for further use
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		return ImageHash{}, nil, fmt.Errorf("failed to read data for hashing: %w", err)
-	}
-
-	hash := CalculateImageHash(data)
-	return hash, data, nil
-}
 
 // Equals compares two ImageHash instances
 func (ih ImageHash) Equals(other ImageHash) bool {

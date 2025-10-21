@@ -2,7 +2,7 @@ package storage
 
 import (
 	"context"
-	"io/ioutil"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +12,7 @@ import (
 )
 
 func TestNewLocalStorage(t *testing.T) {
-	dir, err := ioutil.TempDir("", "local_storage_test")
+	dir, err := os.MkdirTemp("", "local_storage_test")
 	assert.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -22,7 +22,7 @@ func TestNewLocalStorage(t *testing.T) {
 }
 
 func TestLocalStorage_UploadDownload(t *testing.T) {
-	dir, err := ioutil.TempDir("", "local_storage_test")
+	dir, err := os.MkdirTemp("", "local_storage_test")
 	assert.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -38,13 +38,13 @@ func TestLocalStorage_UploadDownload(t *testing.T) {
 	assert.NoError(t, err)
 	defer reader.Close()
 
-	data, err := ioutil.ReadAll(reader)
+	data, err := io.ReadAll(reader)
 	assert.NoError(t, err)
 	assert.Equal(t, content, string(data))
 }
 
 func TestLocalStorage_Exists(t *testing.T) {
-	dir, err := ioutil.TempDir("", "local_storage_test")
+	dir, err := os.MkdirTemp("", "local_storage_test")
 	assert.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -66,7 +66,7 @@ func TestLocalStorage_Exists(t *testing.T) {
 }
 
 func TestLocalStorage_Delete(t *testing.T) {
-	dir, err := ioutil.TempDir("", "local_storage_test")
+	dir, err := os.MkdirTemp("", "local_storage_test")
 	assert.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -87,7 +87,7 @@ func TestLocalStorage_Delete(t *testing.T) {
 }
 
 func TestLocalStorage_GetMetadata(t *testing.T) {
-	dir, err := ioutil.TempDir("", "local_storage_test")
+	dir, err := os.MkdirTemp("", "local_storage_test")
 	assert.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -107,7 +107,7 @@ func TestLocalStorage_GetMetadata(t *testing.T) {
 }
 
 func TestLocalStorage_GetURL(t *testing.T) {
-	dir, err := ioutil.TempDir("", "local_storage_test")
+	dir, err := os.MkdirTemp("", "local_storage_test")
 	assert.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -121,7 +121,7 @@ func TestLocalStorage_GetURL(t *testing.T) {
 }
 
 func TestLocalStorage_Health(t *testing.T) {
-	dir, err := ioutil.TempDir("", "local_storage_test")
+	dir, err := os.MkdirTemp("", "local_storage_test")
 	assert.NoError(t, err)
 	defer os.RemoveAll(dir)
 
