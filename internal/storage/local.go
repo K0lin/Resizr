@@ -31,6 +31,20 @@ func NewLocalStorage(directory string) (ImageStorage, error) {
 // Upload uploads a file to the local filesystem
 func (s *LocalStorage) Upload(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error {
 	path := filepath.Join(s.directory, key)
+
+	// Validate that the resulting path is within the storage directory
+	absRoot, err := filepath.Abs(s.directory)
+	if err != nil {
+		return fmt.Errorf("failed to resolve storage directory: %w", err)
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("failed to resolve target path: %w", err)
+	}
+	if absPath == absRoot || !strings.HasPrefix(absPath+string(os.PathSeparator), absRoot+string(os.PathSeparator)) {
+		return fmt.Errorf("invalid path: %q escapes from storage root", key)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
