@@ -4,8 +4,6 @@ permissions:
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
 env:
   REGISTRY: docker.io
   IMAGE_NAME: ${{ github.repository }}
@@ -17,9 +15,9 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.22'
+        go-version: '1.25.1'
         
     - name: Prepare Go modules
       run: |
@@ -27,32 +25,28 @@ jobs:
         go mod verify
 
     - name: Set up Docker Buildx
-      if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
       uses: docker/setup-buildx-action@v3
-      
+
     - name: Login to Docker Hub
-      if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
-        
+
     - name: Extract metadata
-      if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
       id: meta
       uses: docker/metadata-action@v5
       with:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
           type=raw,value=dev
-          
+
     - name: Build and push Docker image
-      if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
       uses: docker/build-push-action@v5
       with:
         context: .
         platforms: linux/amd64,linux/arm64
-        push: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
