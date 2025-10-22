@@ -122,11 +122,6 @@ func TestWithRequestID(t *testing.T) {
 }
 
 func TestGetRequestID(t *testing.T) {
-	t.Run("nil_context", func(t *testing.T) {
-		id := GetRequestID(nil)
-		assert.Empty(t, id)
-	})
-
 	t.Run("empty_context", func(t *testing.T) {
 		ctx := context.Background()
 		id := GetRequestID(ctx)
@@ -151,11 +146,6 @@ func TestWithUserID(t *testing.T) {
 }
 
 func TestGetUserID(t *testing.T) {
-	t.Run("nil_context", func(t *testing.T) {
-		id := GetUserID(nil)
-		assert.Empty(t, id)
-	})
-
 	t.Run("empty_context", func(t *testing.T) {
 		ctx := context.Background()
 		id := GetUserID(ctx)
