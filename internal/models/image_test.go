@@ -1059,3 +1059,32 @@ func TestGetActualStorageKeyEdgeCases(t *testing.T) {
 		assert.Equal(t, "images/test-id/original.jpg", key)
 	})
 }
+
+func TestIsSafeDimensionString(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{"valid_dimensions", "800x600", true},
+		{"valid_large", "1920x1080", true},
+		{"valid_small", "10x10", true},
+		{"invalid_letters", "800xabc", false},
+		{"invalid_no_x", "800600", false},
+		{"invalid_single_number", "800", false},
+		{"invalid_with_slash", "800/600", false},
+		{"invalid_with_backslash", "800\\600", false},
+		{"invalid_with_dots", "800..600", false},
+		{"invalid_empty", "", false},
+		{"invalid_negative", "-800x600", false},
+		{"invalid_float", "800.5x600", false},
+		{"invalid_trailing_chars", "800x600extra", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := IsSafeDimensionString(tt.input)
+			assert.Equal(t, tt.expected, result, "IsSafeDimensionString(%q)", tt.input)
+		})
+	}
+}
