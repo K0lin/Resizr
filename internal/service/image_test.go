@@ -73,6 +73,22 @@ func (m *mockDeduplicationRepositoryForImageService) GetHashStatistics(_ context
 	return nil, nil
 }
 
+func (m *mockDeduplicationRepositoryForImageService) DecrementResolutionRefs(_ context.Context, _ models.ImageHash, _ string, resolutions []string) (map[string]*repository.ResolutionRefCount, error) {
+	result := make(map[string]*repository.ResolutionRefCount)
+	for _, res := range resolutions {
+		result[res] = &repository.ResolutionRefCount{
+			Count:          0,
+			ReferencingIDs: []string{},
+			ShouldDelete:   true,
+		}
+	}
+	return result, nil
+}
+
+func (m *mockDeduplicationRepositoryForImageService) AddResolutionRef(_ context.Context, _ models.ImageHash, _ string, _ string) error {
+	return nil
+}
+
 type mockImageRepositoryForImageService struct {
 	saveFunc     func(ctx context.Context, metadata *models.ImageMetadata) error
 	getByIDFunc  func(ctx context.Context, id string) (*models.ImageMetadata, error)

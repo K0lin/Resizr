@@ -1080,3 +1080,157 @@ func (b *BadgerImageRepository) GetStorageSavedByDeduplication(ctx context.Conte
 
 	return totalSaved, err
 }
+
+// DecrementResolutionRefs atomically decrements reference counts for resolutions
+// Uses Badger's managed transactions (DB.Update) for atomicity with automatic retries
+// Schema: dedup:res_refs:{hash}:{resolution} -> JSON list of image IDs
+func (b *BadgerImageRepository) DecrementResolutionRefs(ctx context.Context, hash models.ImageHash, imageID string, resolutions []string) (map[string]*ResolutionRefCount, error) {
+	results := make(map[string]*ResolutionRefCount)
+
+	// Use Badger's managed transaction with automatic retry
+	err := b.db.Update(func(txn *badger.Txn) error {
+		for _, resolution := range resolutions {
+			refKey := fmt.Sprintf("dedup:res_refs:%s:%s", hash.GetHashKey(), resolution)
+
+			// Read current IDs
+			var imageIDs []string
+			item, err := txn.Get([]byte(refKey))
+			if err == badger.ErrKeyNotFound {
+				// No references exist, count is 0
+				results[resolution] = &ResolutionRefCount{
+					Count:          0,
+					ReferencingIDs: []string{},
+					ShouldDelete:   true,
+				}
+				continue
+			} else if err != nil {
+				return fmt.Errorf("failed to read resolution refs for %s: %w", resolution, err)
+			}
+
+			// Deserialize IDs
+			err = item.Value(func(val []byte) error {
+				return json.Unmarshal(val, &imageIDs)
+			})
+			if err != nil {
+				return fmt.Errorf("failed to unmarshal resolution refs: %w", err)
+			}
+
+			// Remove imageID from list
+			newIDs := make([]string, 0, len(imageIDs))
+			for _, id := range imageIDs {
+				if id != imageID {
+					newIDs = append(newIDs, id)
+				}
+			}
+
+			newCount := int64(len(newIDs))
+
+			// Update or delete the key
+			if newCount == 0 {
+				// No more references, delete the key
+				if err := txn.Delete([]byte(refKey)); err != nil {
+					return fmt.Errorf("failed to delete empty resolution ref: %w", err)
+				}
+			} else {
+				// Update with new list
+				data, err := json.Marshal(newIDs)
+				if err != nil {
+					return fmt.Errorf("failed to marshal resolution refs: %w", err)
+				}
+
+				if err := txn.Set([]byte(refKey), data); err != nil {
+					return fmt.Errorf("failed to update resolution refs: %w", err)
+				}
+			}
+
+			results[resolution] = &ResolutionRefCount{
+				Count:          newCount,
+				ReferencingIDs: newIDs,
+				ShouldDelete:   newCount == 0,
+			}
+
+			logger.Debug("Resolution reference decremented (Badger)",
+				zap.String("hash", hash.String()),
+				zap.String("resolution", resolution),
+				zap.String("image_id", imageID),
+				zap.Int64("new_count", newCount),
+				zap.Bool("should_delete", newCount == 0))
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		logger.Error("Failed to decrement resolution refs (Badger)",
+			zap.String("hash", hash.String()),
+			zap.String("image_id", imageID),
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to decrement resolution refs: %w", err)
+	}
+
+	return results, nil
+}
+
+// AddResolutionRef atomically adds a resolution reference for an image
+// Uses Badger's managed transaction: adds imageID to JSON list
+func (b *BadgerImageRepository) AddResolutionRef(ctx context.Context, hash models.ImageHash, resolution, imageID string) error {
+	refKey := fmt.Sprintf("dedup:res_refs:%s:%s", hash.GetHashKey(), resolution)
+
+	err := b.db.Update(func(txn *badger.Txn) error {
+		// Read current IDs
+		var imageIDs []string
+		item, err := txn.Get([]byte(refKey))
+
+		if err == badger.ErrKeyNotFound {
+			// First reference, create new list
+			imageIDs = []string{imageID}
+		} else if err != nil {
+			return fmt.Errorf("failed to read resolution refs: %w", err)
+		} else {
+			// Deserialize existing IDs
+			err = item.Value(func(val []byte) error {
+				return json.Unmarshal(val, &imageIDs)
+			})
+			if err != nil {
+				return fmt.Errorf("failed to unmarshal resolution refs: %w", err)
+			}
+
+			// Check if already exists (avoid duplicates)
+			exists := false
+			for _, id := range imageIDs {
+				if id == imageID {
+					exists = true
+					break
+				}
+			}
+
+			if !exists {
+				imageIDs = append(imageIDs, imageID)
+			}
+		}
+
+		// Serialize and store
+		data, err := json.Marshal(imageIDs)
+		if err != nil {
+			return fmt.Errorf("failed to marshal resolution refs: %w", err)
+		}
+
+		return txn.Set([]byte(refKey), data)
+	})
+
+	if err != nil {
+		logger.Error("Failed to add resolution reference (Badger)",
+			zap.String("hash", hash.String()),
+			zap.String("resolution", resolution),
+			zap.String("image_id", imageID),
+			zap.Error(err))
+		return fmt.Errorf("failed to add resolution reference: %w", err)
+	}
+
+	logger.Debug("Resolution reference added (Badger)",
+		zap.String("hash", hash.String()),
+		zap.String("resolution", resolution),
+		zap.String("image_id", imageID))
+
+	return nil
+}

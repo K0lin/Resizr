@@ -98,6 +98,14 @@ type DeduplicationRepository interface {
 
 	// GetStorageSavedByDeduplication calculates total storage saved
 	GetStorageSavedByDeduplication(ctx context.Context) (int64, error)
+
+	// DecrementResolutionRefs atomically decrements reference counts for resolutions
+	// Returns a map of resolution -> new count after decrement
+	// Also returns which image IDs still reference each resolution (for traceability)
+	DecrementResolutionRefs(ctx context.Context, hash models.ImageHash, imageID string, resolutions []string) (map[string]*ResolutionRefCount, error)
+
+	// AddResolutionRef atomically adds a resolution reference for an image
+	AddResolutionRef(ctx context.Context, hash models.ImageHash, resolution, imageID string) error
 }
 
 // CompositeRepository combines all repository interfaces for full functionality
@@ -162,4 +170,14 @@ type BatchOperation struct {
 type BatchRepository interface {
 	// ExecuteBatch executes multiple operations in a transaction
 	ExecuteBatch(ctx context.Context, operations []BatchOperation) error
+}
+
+// ResolutionRefCount holds resolution reference count and metadata
+// Used by DecrementResolutionRefs to return deletion decision information
+type ResolutionRefCount struct {
+	Count          int64    `json:"count"`           // Number of images referencing this resolution
+	ReferencingIDs []string `json:"referencing_ids"` // List of image IDs (for traceability)
+	ShouldDelete   bool     `json:"should_delete"`   // True if count == 0 and file should be deleted
+	StorageKey     string   `json:"storage_key"`     // Storage key for this resolution file
+	FileExists     bool     `json:"file_exists"`     // True if file was verified to exist in storage
 }

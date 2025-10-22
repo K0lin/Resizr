@@ -12,11 +12,15 @@ import (
 
 	"resizr/internal/api"
 	"resizr/internal/config"
+	"resizr/internal/queue"
 	"resizr/internal/repository"
 	"resizr/internal/service"
 	"resizr/internal/storage"
+	"resizr/internal/worker"
 	"resizr/pkg/logger"
 
+	"github.com/dgraph-io/badger/v4"
+	"github.com/go-redis/redis/v8"
 	"go.uber.org/zap"
 )
 
@@ -113,6 +117,108 @@ func run() error {
 	healthService := service.NewHealthService(repo, store, cfg, AppVersion)
 	statisticsService := service.NewStatisticsService(repo, dedupRepo, store, cfg)
 
+	// Initialize deletion queue and workers if async mode is enabled
+	var workerPool *worker.WorkerPool
+	if cfg.Deletion.AsyncMode {
+		logger.Info("Initializing async deletion queue and workers",
+			zap.Int("worker_count", cfg.Deletion.WorkerCount))
+
+		// Get underlying Redis/Badger clients from repository
+		var deletionQueue queue.DeletionQueue
+		var intentMgr worker.IntentManager
+
+		// For simplicity, create new Redis/Badger clients for the queue
+		// (they share the same connection configuration)
+		switch cfg.Cache.Type {
+		case "redis":
+			// Create Redis client for queue
+			redisClient := redis.NewClient(&redis.Options{
+				Addr:     cfg.Redis.URL,
+				Password: cfg.Redis.Password,
+				DB:       cfg.Redis.DB,
+			})
+
+			deletionQueue, err = queue.NewDeletionQueue(cfg, redisClient, nil)
+			if err != nil {
+				logger.Fatal("Failed to initialize deletion queue", zap.Error(err))
+				return fmt.Errorf("failed to initialize deletion queue: %w", err)
+			}
+
+			intentMgr, err = worker.NewIntentManager(cfg.Cache.Type, redisClient, nil)
+			if err != nil {
+				logger.Fatal("Failed to initialize intent manager", zap.Error(err))
+				return fmt.Errorf("failed to initialize intent manager: %w", err)
+			}
+
+		case "badger":
+			// Open Badger DB for queue (use separate directory to avoid lock conflicts)
+			queueDir := cfg.Cache.Directory + "_queue"
+			badgerOpts := badger.DefaultOptions(queueDir).
+				WithLogger(nil) // Disable badger's internal logging
+
+			badgerDB, err := badger.Open(badgerOpts)
+			if err != nil {
+				logger.Fatal("Failed to open Badger DB for queue", zap.Error(err))
+				return fmt.Errorf("failed to open badger DB: %w", err)
+			}
+			defer badgerDB.Close()
+
+			deletionQueue, err = queue.NewDeletionQueue(cfg, nil, badgerDB)
+			if err != nil {
+				logger.Fatal("Failed to initialize deletion queue", zap.Error(err))
+				return fmt.Errorf("failed to initialize deletion queue: %w", err)
+			}
+
+			intentMgr, err = worker.NewIntentManager(cfg.Cache.Type, nil, badgerDB)
+			if err != nil {
+				logger.Fatal("Failed to initialize intent manager", zap.Error(err))
+				return fmt.Errorf("failed to initialize intent manager: %w", err)
+			}
+
+		default:
+			return fmt.Errorf("unsupported cache type: %s", cfg.Cache.Type)
+		}
+
+		// Set deletion queue and intent manager on image service (cast to implementation)
+		if imgSvc, ok := imageService.(*service.ImageServiceImpl); ok {
+			imgSvc.SetDeletionQueue(deletionQueue, intentMgr)
+		} else {
+			return fmt.Errorf("failed to cast image service to implementation type")
+		}
+
+		// Create worker pool config
+		poolConfig := &worker.WorkerPoolConfig{
+			WorkerCount: cfg.Deletion.WorkerCount,
+			WorkerConfig: worker.WorkerConfig{
+				MaxRetries:      cfg.Deletion.MaxRetries,
+				RetryBackoff:    cfg.Deletion.RetryBackoff,
+				DeletionTimeout: cfg.Deletion.DeletionTimeout,
+			},
+			HealthCheckInterval: cfg.Deletion.HealthCheck,
+			ShutdownTimeout:     cfg.Deletion.ShutdownTimeout,
+		}
+
+		// Create worker pool
+		workerPool = worker.NewWorkerPool(
+			deletionQueue,
+			store,
+			intentMgr,
+			poolConfig,
+		)
+
+		// Start worker pool
+		workerCtx := context.Background()
+		if err := workerPool.Start(workerCtx); err != nil {
+			logger.Fatal("Failed to start worker pool", zap.Error(err))
+			return fmt.Errorf("failed to start worker pool: %w", err)
+		}
+
+		logger.Info("Deletion workers started successfully",
+			zap.Int("worker_count", cfg.Deletion.WorkerCount))
+	} else {
+		logger.Info("Async deletion disabled - using synchronous deletion")
+	}
+
 	// Initialize API router
 	logger.Info("Initializing API router...")
 	router := api.NewRouter(cfg, imageService, healthService, statisticsService)
@@ -150,11 +256,11 @@ func run() error {
 		zap.String("port", cfg.Server.Port))
 
 	// Wait for interrupt signal or server error
-	return waitForShutdown(server, serverErrChan)
+	return waitForShutdown(server, workerPool, serverErrChan)
 }
 
 // waitForShutdown waits for shutdown signal and gracefully shuts down the server
-func waitForShutdown(server *http.Server, serverErrChan chan error) error {
+func waitForShutdown(server *http.Server, workerPool *worker.WorkerPool, serverErrChan chan error) error {
 	// Channel to listen for interrupt signals
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -166,17 +272,30 @@ func waitForShutdown(server *http.Server, serverErrChan chan error) error {
 		logger.Info("Received shutdown signal, starting graceful shutdown...",
 			zap.String("signal", sig.String()))
 
-		return gracefulShutdown(server)
+		return gracefulShutdown(server, workerPool)
 	}
 }
 
 // gracefulShutdown performs graceful shutdown of the server
-func gracefulShutdown(server *http.Server) error {
+func gracefulShutdown(server *http.Server, workerPool *worker.WorkerPool) error {
 	// Create context with timeout for shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
 	defer cancel()
 
-	// Attempt graceful shutdown
+	// Shutdown worker pool first (if exists) to finish processing deletion tasks
+	if workerPool != nil {
+		logger.Info("Shutting down deletion worker pool...",
+			zap.Duration("timeout", ShutdownTimeout))
+
+		if err := workerPool.Shutdown(ShutdownTimeout); err != nil {
+			logger.Warn("Worker pool shutdown encountered errors", zap.Error(err))
+			// Continue with server shutdown even if workers had issues
+		} else {
+			logger.Info("Worker pool shut down successfully")
+		}
+	}
+
+	// Attempt graceful shutdown of HTTP server
 	logger.Info("Shutting down HTTP server...",
 		zap.Duration("timeout", ShutdownTimeout))
 

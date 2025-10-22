@@ -798,6 +798,101 @@ func (r *RedisRepository) GetOrphanedHashes(ctx context.Context) ([]models.Image
 	return orphanedHashes, nil
 }
 
+// DecrementResolutionRefs atomically decrements reference counts for resolutions
+// Uses Redis Sets for tracking image IDs per resolution
+// Redis schema: dedup:res_refs:{hash}:{resolution} -> Set of image IDs
+func (r *RedisRepository) DecrementResolutionRefs(ctx context.Context, hash models.ImageHash, imageID string, resolutions []string) (map[string]*ResolutionRefCount, error) {
+	results := make(map[string]*ResolutionRefCount)
+
+	// Use Redis pipeline for atomic batch operations
+	pipe := r.client.Pipeline()
+
+	// For each resolution, remove imageID from the set and get new count
+	for _, resolution := range resolutions {
+		refKey := fmt.Sprintf("dedup:res_refs:%s:%s", hash.GetHashKey(), resolution)
+
+		// SREM: Remove imageID from set (returns 1 if removed, 0 if not in set)
+		pipe.SRem(ctx, refKey, imageID)
+
+		// SCARD: Get remaining count
+		pipe.SCard(ctx, refKey)
+
+		// SMEMBERS: Get all remaining IDs (for traceability)
+		pipe.SMembers(ctx, refKey)
+	}
+
+	// Execute all commands atomically
+	cmds, err := pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		logger.Error("Failed to decrement resolution refs",
+			zap.String("hash", hash.String()),
+			zap.String("image_id", imageID),
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to decrement resolution refs: %w", err)
+	}
+
+	// Parse results (3 commands per resolution: SREM, SCARD, SMEMBERS)
+	cmdIdx := 0
+	for _, resolution := range resolutions {
+		// Skip SREM result (cmd 0)
+		cmdIdx++
+
+		// Get SCARD result (cmd 1)
+		countCmd := cmds[cmdIdx].(*redis.IntCmd)
+		count, _ := countCmd.Result()
+		cmdIdx++
+
+		// Get SMEMBERS result (cmd 2)
+		membersCmd := cmds[cmdIdx].(*redis.StringSliceCmd)
+		members, _ := membersCmd.Result()
+		cmdIdx++
+
+		results[resolution] = &ResolutionRefCount{
+			Count:          count,
+			ReferencingIDs: members,
+			ShouldDelete:   count == 0,
+			// StorageKey and FileExists will be filled by service layer
+		}
+
+		logger.Debug("Resolution reference decremented",
+			zap.String("hash", hash.String()),
+			zap.String("resolution", resolution),
+			zap.String("image_id", imageID),
+			zap.Int64("new_count", count),
+			zap.Bool("should_delete", count == 0))
+	}
+
+	return results, nil
+}
+
+// AddResolutionRef atomically adds a resolution reference for an image
+// Uses Redis Sets: SADD dedup:res_refs:{hash}:{resolution} imageID
+func (r *RedisRepository) AddResolutionRef(ctx context.Context, hash models.ImageHash, resolution, imageID string) error {
+	refKey := fmt.Sprintf("dedup:res_refs:%s:%s", hash.GetHashKey(), resolution)
+
+	// Add imageID to set
+	err := r.client.SAdd(ctx, refKey, imageID).Err()
+	if err != nil {
+		logger.Error("Failed to add resolution reference",
+			zap.String("hash", hash.String()),
+			zap.String("resolution", resolution),
+			zap.String("image_id", imageID),
+			zap.Error(err))
+		return fmt.Errorf("failed to add resolution reference: %w", err)
+	}
+
+	// Get new count for logging
+	count, _ := r.client.SCard(ctx, refKey).Result()
+
+	logger.Debug("Resolution reference added",
+		zap.String("hash", hash.String()),
+		zap.String("resolution", resolution),
+		zap.String("image_id", imageID),
+		zap.Int64("new_count", count))
+
+	return nil
+}
+
 // Statistics methods implementation
 
 // GetImageCountByFormat returns count of images by format

@@ -10,8 +10,10 @@ import (
 
 	"resizr/internal/config"
 	"resizr/internal/models"
+	"resizr/internal/queue"
 	"resizr/internal/repository"
 	"resizr/internal/storage"
+	"resizr/internal/worker"
 	"resizr/pkg/logger"
 
 	"github.com/google/uuid"
@@ -20,11 +22,13 @@ import (
 
 // ImageServiceImpl implements the ImageService interface
 type ImageServiceImpl struct {
-	repo      repository.ImageRepository
-	dedupRepo repository.DeduplicationRepository
-	storage   storage.ImageStorage
-	processor ProcessorService
-	config    *config.Config
+	repo          repository.ImageRepository
+	dedupRepo     repository.DeduplicationRepository
+	storage       storage.ImageStorage
+	processor     ProcessorService
+	config        *config.Config
+	deletionQueue queue.DeletionQueue  // Optional: for async deletion
+	intentMgr     worker.IntentManager // Optional: for deletion intent logging
 }
 
 // NewImageService creates a new image service
@@ -41,7 +45,15 @@ func NewImageService(
 		storage:   storage,
 		processor: processor,
 		config:    config,
+		// deletionQueue and intentMgr are optional, set via SetDeletionQueue if async mode enabled
 	}
+}
+
+// SetDeletionQueue sets the deletion queue and intent manager (for async deletion)
+// This is called during application initialization if DELETION_ASYNC_MODE=true
+func (s *ImageServiceImpl) SetDeletionQueue(q queue.DeletionQueue, intent worker.IntentManager) {
+	s.deletionQueue = q
+	s.intentMgr = intent
 }
 
 // ProcessUpload handles the complete image upload workflow
@@ -130,6 +142,8 @@ func (s *ImageServiceImpl) ProcessUpload(ctx context.Context, input UploadInput)
 			logger.WarnWithContext(ctx, "Failed to verify duplicate by bytes, treating as new image",
 				zap.Error(verifyErr))
 			isDuplicate = false
+			// Create new metadata since verification failed
+			metadata = models.NewImageMetadataWithHash(imageID, input.Filename, mimeType, input.Size, width, height, hash)
 		}
 
 		if isDuplicate {
@@ -145,6 +159,9 @@ func (s *ImageServiceImpl) ProcessUpload(ctx context.Context, input UploadInput)
 					zap.String("original_key", originalKey),
 					zap.Error(existsErr))
 				isDuplicate = false
+				// Reset metadata to non-deduped state
+				metadata.IsDeduped = false
+				metadata.SharedImageID = ""
 			} else if !originalExists {
 				logger.InfoWithContext(ctx, "Original file doesn't exist in storage, uploading new copy",
 					zap.String("original_key", originalKey),
@@ -175,8 +192,13 @@ func (s *ImageServiceImpl) ProcessUpload(ctx context.Context, input UploadInput)
 
 				// Add reference to existing deduplication info
 				existingDedupInfo.AddReference(imageID)
-				// Add reference for original resolution (all images have original)
-				existingDedupInfo.AddResolutionReference("original", imageID)
+
+				// Add atomic reference for original resolution (all images have original)
+				if err := s.dedupRepo.AddResolutionRef(ctx, hash, "original", imageID); err != nil {
+					logger.WarnWithContext(ctx, "Failed to add atomic resolution reference for original",
+						zap.String("image_id", imageID),
+						zap.Error(err))
+				}
 
 				if err := s.dedupRepo.UpdateDeduplicationInfo(ctx, existingDedupInfo); err != nil {
 					return nil, models.StorageError{
@@ -219,8 +241,6 @@ func (s *ImageServiceImpl) ProcessUpload(ctx context.Context, input UploadInput)
 
 		// Create deduplication info for this new image
 		dedupInfo := models.NewDeduplicationInfo(hash, imageID, originalKey)
-		// Add reference for original resolution
-		dedupInfo.AddResolutionReference("original", imageID)
 
 		logger.InfoWithContext(ctx, "Creating new deduplication info",
 			zap.String("image_id", imageID),
@@ -239,6 +259,13 @@ func (s *ImageServiceImpl) ProcessUpload(ctx context.Context, input UploadInput)
 				zap.String("image_id", imageID),
 				zap.String("hash", hash.String()),
 				zap.String("storage_key", originalKey))
+
+			// Add atomic reference for original resolution
+			if err := s.dedupRepo.AddResolutionRef(ctx, hash, "original", imageID); err != nil {
+				logger.WarnWithContext(ctx, "Failed to add atomic resolution reference for original",
+					zap.String("image_id", imageID),
+					zap.Error(err))
+			}
 		}
 	}
 
@@ -305,30 +332,13 @@ func (s *ImageServiceImpl) ProcessUpload(ctx context.Context, input UploadInput)
 			continue
 		}
 
-		// Add resolution reference for deduplication tracking
-		if metadata.IsDeduped {
-			dedupInfo, err := s.dedupRepo.GetDeduplicationInfo(ctx, metadata.Hash)
-			if err == nil {
-				dedupInfo.AddResolutionReference(resolutionName, imageID)
-				if updateErr := s.dedupRepo.UpdateDeduplicationInfo(ctx, dedupInfo); updateErr != nil {
-					logger.WarnWithContext(ctx, "Failed to update resolution reference",
-						zap.String("image_id", imageID),
-						zap.String("resolution", resolutionName),
-						zap.Error(updateErr))
-				}
-			}
-		} else {
-			// For non-deduplicated images, also track resolution references
-			dedupInfo, err := s.dedupRepo.GetDeduplicationInfo(ctx, metadata.Hash)
-			if err == nil {
-				dedupInfo.AddResolutionReference(resolutionName, imageID)
-				if updateErr := s.dedupRepo.UpdateDeduplicationInfo(ctx, dedupInfo); updateErr != nil {
-					logger.WarnWithContext(ctx, "Failed to update resolution reference",
-						zap.String("image_id", imageID),
-						zap.String("resolution", resolutionName),
-						zap.Error(updateErr))
-				}
-			}
+		// Add atomic resolution reference for deduplication tracking
+		if err := s.dedupRepo.AddResolutionRef(ctx, metadata.Hash, resolutionName, imageID); err != nil {
+			logger.WarnWithContext(ctx, "Failed to add atomic resolution reference",
+				zap.String("image_id", imageID),
+				zap.String("resolution", resolutionName),
+				zap.Bool("is_deduped", metadata.IsDeduped),
+				zap.Error(err))
 		}
 
 		// ...existing code...
@@ -468,6 +478,7 @@ func (s *ImageServiceImpl) ProcessResolution(ctx context.Context, imageID, resol
 }
 
 // DeleteImage removes an image and all its resolutions
+// Uses atomic reference counting and async deletion queue
 func (s *ImageServiceImpl) DeleteImage(ctx context.Context, imageID string) error {
 	logger.InfoWithContext(ctx, "Deleting image",
 		zap.String("image_id", imageID))
@@ -478,253 +489,148 @@ func (s *ImageServiceImpl) DeleteImage(ctx context.Context, imageID string) erro
 		return err
 	}
 
-	// Handle deduplication cleanup
+	// Collect all resolutions (original + custom)
+	allResolutions := append([]string{"original"}, metadata.Resolutions...)
+
+	// Variables to track deletion results
+	var deletedResolutions []string
+	var sharedResolutions []string
+	var asyncDeletionIntents []string
+
+	// Handle deduplication cleanup with atomic operations
 	if metadata.Hash.Value != "" {
-		dedupInfo, err := s.dedupRepo.GetDeduplicationInfo(ctx, metadata.Hash)
-		if err == nil {
-			// Ensure ResolutionRefs is initialized (for backward compatibility)
-			if dedupInfo.ResolutionRefs == nil {
-				dedupInfo.ResolutionRefs = make(map[string]*models.ResolutionReference)
-				logger.WarnWithContext(ctx, "Found deduplication info without resolution references, rebuilding resolution tracking",
-					zap.String("image_id", imageID),
-					zap.String("hash", metadata.Hash.String()))
-
-				// Rebuild resolution references for all existing images
-				if rebuildErr := s.rebuildResolutionReferences(ctx, dedupInfo); rebuildErr != nil {
-					logger.WarnWithContext(ctx, "Failed to rebuild resolution references, proceeding with manual cleanup",
-						zap.String("image_id", imageID),
-						zap.Error(rebuildErr))
-				}
-			}
-
-			// Track which files should be deleted
-			resolutionsToDelete := make(map[string]bool)
-
-			// Remove references for all resolutions this image uses
-			allResolutions := append([]string{"original"}, metadata.Resolutions...)
-
-			for _, resolution := range allResolutions {
-				// Remove this image's reference
-				dedupInfo.RemoveResolutionReference(resolution, imageID)
-
-				// Check if this resolution should be physically deleted
-				shouldDeletePhysicalFile := dedupInfo.GetResolutionReferenceCount(resolution) == 0
-
-				// Double-check by manually verifying remaining images (for robustness)
-				if shouldDeletePhysicalFile && len(dedupInfo.ReferencingIDs) > 0 {
-					for _, otherImageID := range dedupInfo.ReferencingIDs {
-						if otherImageID != imageID {
-							otherMetadata, err := s.GetMetadata(ctx, otherImageID)
-							if err == nil {
-								if resolution == "original" || otherMetadata.HasResolution(resolution) {
-									shouldDeletePhysicalFile = false
-									logger.InfoWithContext(ctx, "Resolution still used by other image",
-										zap.String("image_id", imageID),
-										zap.String("resolution", resolution),
-										zap.String("other_image", otherImageID))
-									// Re-add the resolution reference if it was missing
-									if dedupInfo.GetResolutionReferenceCount(resolution) == 0 {
-										dedupInfo.AddResolutionReference(resolution, otherImageID)
-									}
-									break
-								}
-							}
-						}
-					}
-				}
-
-				// Additional check: Only mark for deletion if the file actually exists in storage
-				// This prevents trying to delete files that were never created for this image
-				if shouldDeletePhysicalFile {
-					storageKey := metadata.GetActualStorageKey(resolution)
-					exists, err := s.storage.Exists(ctx, storageKey)
-					if err != nil {
-						logger.WarnWithContext(ctx, "Failed to check if resolution exists in storage",
-							zap.String("image_id", imageID),
-							zap.String("resolution", resolution),
-							zap.String("storage_key", storageKey),
-							zap.Error(err))
-						// If we can't check existence, be conservative and don't delete
-						shouldDeletePhysicalFile = false
-					} else if !exists {
-						logger.InfoWithContext(ctx, "Resolution file doesn't exist in storage, skipping deletion",
-							zap.String("image_id", imageID),
-							zap.String("resolution", resolution),
-							zap.String("storage_key", storageKey))
-						shouldDeletePhysicalFile = false
-					}
-				}
-
-				if shouldDeletePhysicalFile {
-					resolutionsToDelete[resolution] = true
-					logger.InfoWithContext(ctx, "Resolution marked for deletion",
-						zap.String("image_id", imageID),
-						zap.String("resolution", resolution))
-				}
-			}
-
-			// Remove general image reference
-			dedupInfo.RemoveReference(imageID)
-
-			// Delete physical files before updating deduplication info
-			for resolution := range resolutionsToDelete {
-				storageKey := metadata.GetActualStorageKey(resolution)
-				if err := s.storage.Delete(ctx, storageKey); err != nil {
-					logger.WarnWithContext(ctx, "Failed to delete resolution from storage",
-						zap.String("image_id", imageID),
-						zap.String("resolution", resolution),
-						zap.String("storage_key", storageKey),
-						zap.Error(err))
-				} else {
-					logger.InfoWithContext(ctx, "Physical resolution file deleted",
-						zap.String("image_id", imageID),
-						zap.String("resolution", resolution),
-						zap.String("storage_key", storageKey))
-				}
-			}
-
-			// Update or delete deduplication info
-			if dedupInfo.IsOrphaned() {
-				// No images reference this content anymore, perform final cleanup
-				logger.InfoWithContext(ctx, "Deduplication info is orphaned, performing final cleanup",
-					zap.String("image_id", imageID),
-					zap.String("hash", metadata.Hash.String()),
-					zap.String("master_id", dedupInfo.MasterImageID))
-
-				// Attempt to delete any remaining files that might exist
-				// (this handles cases where files exist but references were lost)
-				allPossibleResolutions := []string{"original", "thumbnail"}
-				// Add any custom resolutions that might exist
-				for resolution := range dedupInfo.ResolutionRefs {
-					allPossibleResolutions = append(allPossibleResolutions, resolution)
-				}
-				// Add resolutions from the deleted image metadata
-				allPossibleResolutions = append(allPossibleResolutions, metadata.Resolutions...)
-
-				// Remove duplicates
-				resolutionSet := make(map[string]bool)
-				for _, res := range allPossibleResolutions {
-					resolutionSet[res] = true
-				}
-
-				for resolution := range resolutionSet {
-					storageKey := metadata.GetActualStorageKey(resolution)
-					if err := s.storage.Delete(ctx, storageKey); err != nil {
-						logger.DebugWithContext(ctx, "Failed to clean up resolution (likely doesn't exist)",
-							zap.String("resolution", resolution),
-							zap.String("storage_key", storageKey),
-							zap.Error(err))
-					} else {
-						logger.InfoWithContext(ctx, "Final cleanup: deleted remaining resolution file",
-							zap.String("resolution", resolution),
-							zap.String("storage_key", storageKey))
-					}
-				}
-
-				// Now delete the entire folder for the master image
-				folderPrefix := fmt.Sprintf("images/%s", dedupInfo.MasterImageID)
-				if err := s.storage.DeleteFolder(ctx, folderPrefix); err != nil {
-					logger.WarnWithContext(ctx, "Failed to delete image folder (but individual files were cleaned up)",
-						zap.String("image_id", imageID),
-						zap.String("master_id", dedupInfo.MasterImageID),
-						zap.String("folder", folderPrefix),
-						zap.Error(err))
-				} else {
-					logger.InfoWithContext(ctx, "Image folder deleted successfully",
-						zap.String("image_id", imageID),
-						zap.String("master_id", dedupInfo.MasterImageID),
-						zap.String("folder", folderPrefix))
-				}
-
-				if err := s.dedupRepo.DeleteDeduplicationInfo(ctx, metadata.Hash); err != nil {
-					logger.WarnWithContext(ctx, "Failed to delete deduplication info",
-						zap.String("image_id", imageID),
-						zap.String("hash", metadata.Hash.String()),
-						zap.Error(err))
-				} else {
-					logger.InfoWithContext(ctx, "Deduplication info deleted successfully",
-						zap.String("image_id", imageID),
-						zap.String("hash", metadata.Hash.String()))
-				}
-			} else {
-				// Update deduplication info with removed references
-				if err := s.dedupRepo.UpdateDeduplicationInfo(ctx, dedupInfo); err != nil {
-					logger.WarnWithContext(ctx, "Failed to update deduplication info",
-						zap.String("image_id", imageID),
-						zap.String("hash", metadata.Hash.String()),
-						zap.Error(err))
-				} else {
-					logger.InfoWithContext(ctx, "Deduplication info updated with removed references",
-						zap.String("image_id", imageID),
-						zap.Int("remaining_references", dedupInfo.ReferenceCount))
-				}
-			}
-		} else {
-			logger.WarnWithContext(ctx, "Failed to get deduplication info during deletion, performing standalone cleanup",
+		// Atomically decrement references for all resolutions
+		refCounts, err := s.dedupRepo.DecrementResolutionRefs(ctx, metadata.Hash, imageID, allResolutions)
+		if err != nil {
+			logger.ErrorWithContext(ctx, "Failed to decrement resolution references",
 				zap.String("image_id", imageID),
 				zap.String("hash", metadata.Hash.String()),
 				zap.Error(err))
+			// Continue with best-effort cleanup
+			refCounts = make(map[string]*repository.ResolutionRefCount)
+		}
 
-			// If we can't get deduplication info, delete the files anyway since this might be the last image
-			allResolutions := append([]string{"original"}, metadata.Resolutions...)
-			for _, resolution := range allResolutions {
-				storageKey := metadata.GetStorageKey(resolution)
-				if deleteErr := s.storage.Delete(ctx, storageKey); deleteErr != nil {
-					logger.DebugWithContext(ctx, "Failed to delete resolution during standalone cleanup",
-						zap.String("resolution", resolution),
-						zap.String("storage_key", storageKey),
-						zap.Error(deleteErr))
-				} else {
-					logger.InfoWithContext(ctx, "Standalone cleanup: deleted resolution file",
-						zap.String("resolution", resolution),
-						zap.String("storage_key", storageKey))
-				}
+		// Process each resolution based on reference count
+		for _, resolution := range allResolutions {
+			refCount, exists := refCounts[resolution]
+			if !exists {
+				// No reference info, skip (shouldn't happen with new system)
+				logger.WarnWithContext(ctx, "No reference count info for resolution",
+					zap.String("image_id", imageID),
+					zap.String("resolution", resolution))
+				continue
 			}
 
-			// Try to delete the folder as well
-			folderPrefix := fmt.Sprintf("images/%s", imageID)
-			if err := s.storage.DeleteFolder(ctx, folderPrefix); err != nil {
-				logger.WarnWithContext(ctx, "Standalone cleanup: failed to delete image folder",
+			logger.InfoWithContext(ctx, "Resolution reference count updated",
+				zap.String("image_id", imageID),
+				zap.String("resolution", resolution),
+				zap.Int64("remaining_refs", refCount.Count),
+				zap.Bool("should_delete", refCount.ShouldDelete))
+
+			if refCount.ShouldDelete {
+				// No more references - delete physical file
+				storageKey := metadata.GetActualStorageKey(resolution)
+
+				// Check if async deletion is enabled
+				if s.config.Deletion.AsyncMode && s.deletionQueue != nil && s.intentMgr != nil {
+					// Async deletion via queue
+					if err := s.enqueueDeletion(ctx, imageID, resolution, storageKey, metadata.Hash.String()); err != nil {
+						logger.ErrorWithContext(ctx, "Failed to enqueue deletion",
+							zap.String("image_id", imageID),
+							zap.String("resolution", resolution),
+							zap.Error(err))
+						// Fallback to sync deletion
+						if err := s.storage.Delete(ctx, storageKey); err != nil {
+							logger.WarnWithContext(ctx, "Failed to delete resolution (sync fallback)",
+								zap.String("resolution", resolution),
+								zap.Error(err))
+						}
+					} else {
+						asyncDeletionIntents = append(asyncDeletionIntents, resolution)
+					}
+				} else {
+					// Synchronous deletion
+					if err := s.storage.Delete(ctx, storageKey); err != nil {
+						logger.WarnWithContext(ctx, "Failed to delete resolution",
+							zap.String("resolution", resolution),
+							zap.Error(err))
+					} else {
+						logger.InfoWithContext(ctx, "Resolution deleted",
+							zap.String("resolution", resolution))
+					}
+				}
+
+				deletedResolutions = append(deletedResolutions, resolution)
+			} else {
+				// Still referenced by other images
+				sharedResolutions = append(sharedResolutions, resolution)
+				logger.InfoWithContext(ctx, "Resolution kept (still referenced)",
 					zap.String("image_id", imageID),
+					zap.String("resolution", resolution),
+					zap.Int64("remaining_refs", refCount.Count))
+			}
+		}
+
+		// Check if deduplication info is now orphaned
+		dedupInfo, err := s.dedupRepo.GetDeduplicationInfo(ctx, metadata.Hash)
+		if err == nil && dedupInfo.IsOrphaned() {
+			logger.InfoWithContext(ctx, "Deduplication info is orphaned, cleaning up",
+				zap.String("hash", metadata.Hash.String()))
+
+			// Delete folder
+			folderPrefix := fmt.Sprintf("images/%s", dedupInfo.MasterImageID)
+			if err := s.storage.DeleteFolder(ctx, folderPrefix); err != nil {
+				logger.WarnWithContext(ctx, "Failed to delete image folder",
 					zap.String("folder", folderPrefix),
 					zap.Error(err))
-			} else {
-				logger.InfoWithContext(ctx, "Standalone cleanup: image folder deleted successfully",
-					zap.String("image_id", imageID),
-					zap.String("folder", folderPrefix))
+			}
+
+			// Delete deduplication info
+			if err := s.dedupRepo.DeleteDeduplicationInfo(ctx, metadata.Hash); err != nil {
+				logger.WarnWithContext(ctx, "Failed to delete deduplication info",
+					zap.String("hash", metadata.Hash.String()),
+					zap.Error(err))
 			}
 		}
 	} else {
-		// Handle images without hash (non-deduplicated images)
-		logger.InfoWithContext(ctx, "Deleting non-deduplicated image files",
+		// Non-deduplicated image - delete all files directly
+		logger.InfoWithContext(ctx, "Deleting non-deduplicated image",
 			zap.String("image_id", imageID))
 
-		allResolutions := append([]string{"original"}, metadata.Resolutions...)
 		for _, resolution := range allResolutions {
 			storageKey := metadata.GetStorageKey(resolution)
-			if deleteErr := s.storage.Delete(ctx, storageKey); deleteErr != nil {
-				logger.WarnWithContext(ctx, "Failed to delete resolution file",
-					zap.String("resolution", resolution),
-					zap.String("storage_key", storageKey),
-					zap.Error(deleteErr))
+
+			if s.config.Deletion.AsyncMode && s.deletionQueue != nil && s.intentMgr != nil {
+				// Async deletion
+				if err := s.enqueueDeletion(ctx, imageID, resolution, storageKey, ""); err != nil {
+					logger.ErrorWithContext(ctx, "Failed to enqueue deletion",
+						zap.String("resolution", resolution),
+						zap.Error(err))
+					// Fallback to sync
+					if err := s.storage.Delete(ctx, storageKey); err != nil {
+						logger.WarnWithContext(ctx, "Fallback sync deletion failed", zap.String("resolution", resolution), zap.Error(err))
+					}
+				} else {
+					asyncDeletionIntents = append(asyncDeletionIntents, resolution)
+				}
 			} else {
-				logger.InfoWithContext(ctx, "Deleted resolution file",
-					zap.String("resolution", resolution),
-					zap.String("storage_key", storageKey))
+				// Sync deletion
+				if err := s.storage.Delete(ctx, storageKey); err != nil {
+					logger.WarnWithContext(ctx, "Failed to delete resolution",
+						zap.String("resolution", resolution),
+						zap.Error(err))
+				}
 			}
+
+			deletedResolutions = append(deletedResolutions, resolution)
 		}
 
-		// Delete the entire folder for this non-deduplicated image
+		// Delete folder
 		folderPrefix := fmt.Sprintf("images/%s", imageID)
 		if err := s.storage.DeleteFolder(ctx, folderPrefix); err != nil {
-			logger.WarnWithContext(ctx, "Failed to delete image folder (but individual files were cleaned up)",
-				zap.String("image_id", imageID),
+			logger.WarnWithContext(ctx, "Failed to delete image folder",
 				zap.String("folder", folderPrefix),
 				zap.Error(err))
-		} else {
-			logger.InfoWithContext(ctx, "Image folder deleted successfully",
-				zap.String("image_id", imageID),
-				zap.String("folder", folderPrefix))
 		}
 	}
 
@@ -737,14 +643,74 @@ func (s *ImageServiceImpl) DeleteImage(ctx context.Context, imageID string) erro
 		}
 	}
 
-	logger.InfoWithContext(ctx, "Image deleted successfully",
+	logger.InfoWithContext(ctx, "Image deletion completed",
 		zap.String("image_id", imageID),
-		zap.Bool("was_deduplicated", metadata.IsDeduped))
+		zap.Strings("deleted_resolutions", deletedResolutions),
+		zap.Strings("shared_resolutions", sharedResolutions),
+		zap.Strings("async_deletions", asyncDeletionIntents),
+		zap.Bool("async_mode", s.config.Deletion.AsyncMode))
+
+	return nil
+}
+
+// enqueueDeletion creates a deletion intent and enqueues a deletion message
+func (s *ImageServiceImpl) enqueueDeletion(ctx context.Context, imageID, resolution, storageKey, hash string) error {
+	// Create deletion intent
+	intentID := uuid.New().String()
+	intent := &queue.DeletionIntent{
+		IntentID:   intentID,
+		ImageID:    imageID,
+		Resolution: resolution,
+		StorageKey: storageKey,
+		Hash:       hash,
+		Status:     "pending",
+		CreatedAt:  time.Now(),
+	}
+
+	if err := s.intentMgr.CreateIntent(ctx, intent); err != nil {
+		return fmt.Errorf("failed to create intent: %w", err)
+	}
+
+	// Enqueue deletion message
+	msg := &queue.DeletionMessage{
+		IntentID:   intentID,
+		ImageID:    imageID,
+		Resolution: resolution,
+		StorageKey: storageKey,
+		Hash:       hash,
+		Priority:   "normal",
+	}
+
+	messageID, err := s.deletionQueue.Enqueue(ctx, msg)
+	if err != nil {
+		// Cleanup intent on enqueue failure
+		if delErr := s.intentMgr.DeleteIntent(ctx, intentID); delErr != nil {
+			logger.WarnWithContext(ctx, "Failed to cleanup intent after enqueue failure",
+				zap.String("intent_id", intentID),
+				zap.Error(delErr))
+		}
+		return fmt.Errorf("failed to enqueue message: %w", err)
+	}
+
+	// Update intent with message ID
+	intent.MessageID = messageID
+	if err := s.intentMgr.UpdateStatus(ctx, intentID, "pending", "", ""); err != nil {
+		logger.WarnWithContext(ctx, "Failed to update intent status",
+			zap.String("intent_id", intentID),
+			zap.Error(err))
+	}
+
+	logger.InfoWithContext(ctx, "Deletion enqueued",
+		zap.String("intent_id", intentID),
+		zap.String("message_id", messageID),
+		zap.String("image_id", imageID),
+		zap.String("resolution", resolution))
 
 	return nil
 }
 
 // DeleteResolution removes a specific resolution from an image (except original)
+// Uses atomic reference counting and async deletion queue
 func (s *ImageServiceImpl) DeleteResolution(ctx context.Context, imageID, resolution string) error {
 	logger.InfoWithContext(ctx, "Deleting resolution",
 		zap.String("image_id", imageID),
@@ -772,122 +738,110 @@ func (s *ImageServiceImpl) DeleteResolution(ctx context.Context, imageID, resolu
 		}
 	}
 
-	// Check if other images are using this resolution (works for both deduplicated and non-deduplicated)
-	shouldDeletePhysicalFile := true
+	var physicallyDeleted bool
+	var remainingRefs int64
 
-	// Get deduplication info to check per-resolution references
-	dedupInfo, err := s.dedupRepo.GetDeduplicationInfo(ctx, metadata.Hash)
-	if err == nil {
-		// Ensure ResolutionRefs is initialized (for backward compatibility)
-		if dedupInfo.ResolutionRefs == nil {
-			dedupInfo.ResolutionRefs = make(map[string]*models.ResolutionReference)
-			logger.WarnWithContext(ctx, "Found deduplication info without resolution references, rebuilding",
+	// Handle deduplication with atomic reference counting
+	if metadata.Hash.Value != "" {
+		// Atomically decrement reference for this resolution
+		refCounts, err := s.dedupRepo.DecrementResolutionRefs(ctx, metadata.Hash, imageID, []string{resolution})
+		if err != nil {
+			logger.ErrorWithContext(ctx, "Failed to decrement resolution reference",
 				zap.String("image_id", imageID),
 				zap.String("resolution", resolution),
-				zap.String("hash", metadata.Hash.String()))
-
-			// Rebuild resolution references for all existing images
-			if rebuildErr := s.rebuildResolutionReferences(ctx, dedupInfo); rebuildErr != nil {
-				logger.WarnWithContext(ctx, "Failed to rebuild resolution references",
-					zap.String("image_id", imageID),
-					zap.Error(rebuildErr))
-			}
+				zap.Error(err))
+			return fmt.Errorf("failed to decrement resolution reference: %w", err)
 		}
 
-		// Remove this image's reference to the resolution
-		dedupInfo.RemoveResolutionReference(resolution, imageID)
-
-		// Check if any other images still reference this resolution
-		if dedupInfo.GetResolutionReferenceCount(resolution) > 0 {
-			shouldDeletePhysicalFile = false
-			logger.InfoWithContext(ctx, "Resolution is still used by other images, keeping physical file",
-				zap.String("image_id", imageID),
-				zap.String("resolution", resolution),
-				zap.Int("remaining_refs", dedupInfo.GetResolutionReferenceCount(resolution)))
-		} else {
-			// Double-check by manually verifying remaining images (for robustness)
-			for _, otherImageID := range dedupInfo.ReferencingIDs {
-				if otherImageID != imageID {
-					otherMetadata, err := s.GetMetadata(ctx, otherImageID)
-					if err == nil && otherMetadata.HasResolution(resolution) {
-						shouldDeletePhysicalFile = false
-						logger.InfoWithContext(ctx, "Resolution still used by other image (fallback check)",
-							zap.String("image_id", imageID),
-							zap.String("resolution", resolution),
-							zap.String("other_image", otherImageID))
-						// Re-add the resolution reference if it was missing
-						dedupInfo.AddResolutionReference(resolution, otherImageID)
-						break
-					}
-				}
-			}
-		}
-
-		// Update deduplication info
-		if updateErr := s.dedupRepo.UpdateDeduplicationInfo(ctx, dedupInfo); updateErr != nil {
-			logger.WarnWithContext(ctx, "Failed to update resolution reference",
-				zap.String("image_id", imageID),
-				zap.String("resolution", resolution),
-				zap.Error(updateErr))
-		}
-	} else {
-		// If we can't get deduplication info, be conservative and check manually
-		logger.WarnWithContext(ctx, "Failed to get deduplication info, performing manual check",
-			zap.String("image_id", imageID),
-			zap.String("resolution", resolution),
-			zap.Error(err))
-
-		// For non-deduplicated images or fallback, we can safely delete the resolution
-		// since each image has its own files
-		if !metadata.IsDeduped {
-			shouldDeletePhysicalFile = true
-		} else {
-			// For deduplicated images without dedup info, be conservative
-			shouldDeletePhysicalFile = false
-			logger.WarnWithContext(ctx, "Deduplicated image without dedup info, conservatively keeping resolution",
+		refCount, exists := refCounts[resolution]
+		if !exists {
+			logger.WarnWithContext(ctx, "No reference count returned for resolution",
 				zap.String("image_id", imageID),
 				zap.String("resolution", resolution))
+			refCount = &repository.ResolutionRefCount{Count: 0, ShouldDelete: false}
 		}
-	}
 
-	// Delete physical file if no other images need it
-	if shouldDeletePhysicalFile {
-		storageKey := metadata.GetActualStorageKey(resolution)
+		remainingRefs = refCount.Count
 
-		// Check if file actually exists before trying to delete
-		exists, existsErr := s.storage.Exists(ctx, storageKey)
-		if existsErr != nil {
-			logger.WarnWithContext(ctx, "Failed to check if resolution exists in storage",
-				zap.String("image_id", imageID),
-				zap.String("resolution", resolution),
-				zap.String("storage_key", storageKey),
-				zap.Error(existsErr))
-			// Continue without deletion if we can't check existence
-		} else if !exists {
-			logger.InfoWithContext(ctx, "Resolution file doesn't exist in storage, skipping deletion",
-				zap.String("image_id", imageID),
-				zap.String("resolution", resolution),
-				zap.String("storage_key", storageKey))
-		} else {
-			// File exists, proceed with deletion
-			if err := s.storage.Delete(ctx, storageKey); err != nil {
-				logger.WarnWithContext(ctx, "Failed to delete resolution from storage",
-					zap.String("image_id", imageID),
-					zap.String("resolution", resolution),
-					zap.String("storage_key", storageKey),
-					zap.Error(err))
-				// Continue with metadata update even if storage deletion fails
+		logger.InfoWithContext(ctx, "Resolution reference decremented",
+			zap.String("image_id", imageID),
+			zap.String("resolution", resolution),
+			zap.Int64("remaining_refs", remainingRefs),
+			zap.Bool("should_delete", refCount.ShouldDelete))
+
+		// Delete physical file if no more references
+		if refCount.ShouldDelete {
+			storageKey := metadata.GetActualStorageKey(resolution)
+
+			// Check if async deletion is enabled
+			if s.config.Deletion.AsyncMode && s.deletionQueue != nil && s.intentMgr != nil {
+				// Async deletion via queue
+				if err := s.enqueueDeletion(ctx, imageID, resolution, storageKey, metadata.Hash.String()); err != nil {
+					logger.ErrorWithContext(ctx, "Failed to enqueue deletion",
+						zap.String("image_id", imageID),
+						zap.String("resolution", resolution),
+						zap.Error(err))
+					// Fallback to sync deletion
+					if err := s.storage.Delete(ctx, storageKey); err != nil {
+						logger.WarnWithContext(ctx, "Failed to delete resolution (sync fallback)",
+							zap.String("resolution", resolution),
+							zap.Error(err))
+					} else {
+						physicallyDeleted = true
+					}
+				} else {
+					// Queued for deletion (not immediate)
+					physicallyDeleted = false
+					logger.InfoWithContext(ctx, "Resolution deletion queued",
+						zap.String("resolution", resolution))
+				}
 			} else {
-				logger.InfoWithContext(ctx, "Physical resolution file deleted",
-					zap.String("image_id", imageID),
-					zap.String("resolution", resolution),
-					zap.String("storage_key", storageKey))
+				// Synchronous deletion
+				if err := s.storage.Delete(ctx, storageKey); err != nil {
+					logger.WarnWithContext(ctx, "Failed to delete resolution",
+						zap.String("resolution", resolution),
+						zap.Error(err))
+				} else {
+					physicallyDeleted = true
+					logger.InfoWithContext(ctx, "Resolution physically deleted",
+						zap.String("resolution", resolution))
+				}
 			}
+		} else {
+			logger.InfoWithContext(ctx, "Resolution kept (still referenced by other images)",
+				zap.String("image_id", imageID),
+				zap.String("resolution", resolution),
+				zap.Int64("remaining_refs", remainingRefs))
 		}
 	} else {
-		logger.InfoWithContext(ctx, "Resolution removed virtually (physical file kept for other images)",
-			zap.String("image_id", imageID),
-			zap.String("resolution", resolution))
+		// Non-deduplicated image - delete directly
+		storageKey := metadata.GetStorageKey(resolution)
+
+		if s.config.Deletion.AsyncMode && s.deletionQueue != nil && s.intentMgr != nil {
+			// Async deletion
+			if err := s.enqueueDeletion(ctx, imageID, resolution, storageKey, ""); err != nil {
+				logger.ErrorWithContext(ctx, "Failed to enqueue deletion",
+					zap.String("resolution", resolution),
+					zap.Error(err))
+				// Fallback to sync
+				if err := s.storage.Delete(ctx, storageKey); err != nil {
+					logger.WarnWithContext(ctx, "Failed to delete resolution",
+						zap.String("resolution", resolution),
+						zap.Error(err))
+				} else {
+					physicallyDeleted = true
+				}
+			}
+		} else {
+			// Sync deletion
+			if err := s.storage.Delete(ctx, storageKey); err != nil {
+				logger.WarnWithContext(ctx, "Failed to delete resolution",
+					zap.String("resolution", resolution),
+					zap.Error(err))
+			} else {
+				physicallyDeleted = true
+			}
+		}
 	}
 
 	// Remove resolution from metadata
@@ -909,10 +863,12 @@ func (s *ImageServiceImpl) DeleteResolution(ctx context.Context, imageID, resolu
 		}
 	}
 
-	logger.InfoWithContext(ctx, "Resolution deleted successfully",
+	logger.InfoWithContext(ctx, "Resolution deletion completed",
 		zap.String("image_id", imageID),
 		zap.String("resolution", resolution),
-		zap.Bool("physical_file_deleted", shouldDeletePhysicalFile))
+		zap.Bool("physically_deleted", physicallyDeleted),
+		zap.Int64("remaining_references", remainingRefs),
+		zap.Bool("async_mode", s.config.Deletion.AsyncMode))
 
 	return nil
 }
@@ -1225,35 +1181,4 @@ func (s *ImageServiceImpl) verifyDuplicateByBytes(ctx context.Context, existingI
 		zap.Bool("is_duplicate", isDuplicate))
 
 	return isDuplicate, nil
-}
-
-// rebuildResolutionReferences rebuilds resolution references for backward compatibility
-func (s *ImageServiceImpl) rebuildResolutionReferences(ctx context.Context, dedupInfo *models.DeduplicationInfo) error {
-	logger.InfoWithContext(ctx, "Rebuilding resolution references",
-		zap.String("hash", dedupInfo.Hash.String()),
-		zap.Strings("referencing_ids", dedupInfo.ReferencingIDs))
-
-	for _, imageID := range dedupInfo.ReferencingIDs {
-		metadata, err := s.GetMetadata(ctx, imageID)
-		if err != nil {
-			logger.WarnWithContext(ctx, "Failed to get metadata for image during resolution rebuild",
-				zap.String("image_id", imageID),
-				zap.Error(err))
-			continue
-		}
-
-		// Add reference for original resolution (all images have original)
-		dedupInfo.AddResolutionReference("original", imageID)
-
-		// Add references for all custom resolutions
-		for _, resolution := range metadata.Resolutions {
-			dedupInfo.AddResolutionReference(resolution, imageID)
-		}
-	}
-
-	logger.InfoWithContext(ctx, "Resolution references rebuilt successfully",
-		zap.String("hash", dedupInfo.Hash.String()),
-		zap.Int("resolution_count", len(dedupInfo.ResolutionRefs)))
-
-	return nil
 }

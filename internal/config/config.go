@@ -25,6 +25,7 @@ type Config struct {
 	Health     HealthConfig
 	Auth       AuthConfig
 	Statistics StatisticsConfig
+	Deletion   DeletionConfig
 }
 
 // ServerConfig holds HTTP server configuration
@@ -135,6 +136,17 @@ type StatisticsConfig struct {
 	CacheTTL     time.Duration // TTL for cached statistics
 }
 
+// DeletionConfig holds deletion worker configuration
+type DeletionConfig struct {
+	AsyncMode       bool          // Enable async deletion via queue (default: true)
+	WorkerCount     int           // Number of deletion workers (default: 5)
+	MaxRetries      int           // Max retries before DLQ (default: 3)
+	RetryBackoff    time.Duration // Base retry backoff duration (default: 30s)
+	DeletionTimeout time.Duration // Timeout for S3 deletion operations (default: 30s)
+	HealthCheck     time.Duration // Health check interval (default: 60s)
+	ShutdownTimeout time.Duration // Graceful shutdown timeout (default: 30s)
+}
+
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
 	// Load .env file if it exists (for development)
@@ -215,6 +227,15 @@ func Load() (*Config, error) {
 		Statistics: StatisticsConfig{
 			CacheEnabled: getEnvBool("STATISTICS_CACHE_ENABLED", true),
 			CacheTTL:     time.Duration(getEnvInt("STATISTICS_CACHE_TTL", 300)) * time.Second,
+		},
+		Deletion: DeletionConfig{
+			AsyncMode:       getEnvBool("DELETION_ASYNC_MODE", true),
+			WorkerCount:     getEnvInt("DELETION_WORKERS", 5),
+			MaxRetries:      getEnvInt("DELETION_MAX_RETRIES", 3),
+			RetryBackoff:    time.Duration(getEnvInt("DELETION_RETRY_BACKOFF", 30)) * time.Second,
+			DeletionTimeout: time.Duration(getEnvInt("DELETION_TIMEOUT", 30)) * time.Second,
+			HealthCheck:     time.Duration(getEnvInt("DELETION_HEALTH_CHECK", 60)) * time.Second,
+			ShutdownTimeout: time.Duration(getEnvInt("DELETION_SHUTDOWN_TIMEOUT", 30)) * time.Second,
 		},
 	}
 
