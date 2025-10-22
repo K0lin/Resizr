@@ -24,6 +24,9 @@ go.work.sum
 # Log files
 *.log
 
+#coverage files
+.coverage-check.out
+
 # Cache directories
 data/
 cache/
