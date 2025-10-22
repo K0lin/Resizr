@@ -207,6 +207,12 @@ func (s *LocalStorage) CopyObject(ctx context.Context, sourceKey, destKey string
 	}
 	defer sourceFile.Close()
 
+	// Ensure destination directory exists
+	destDir := filepath.Dir(destPath)
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+
 	destFile, err := os.Create(destPath)
 	if err != nil {
 		return fmt.Errorf("failed to create destination file: %w", err)
