@@ -140,7 +140,7 @@ func TestLocalStorage_DeleteFolder(t *testing.T) {
 	storage, err := NewLocalStorage(dir)
 	assert.NoError(t, err)
 
-	// Create multiple files in a folder
+	// Test 1: Try to delete folder with files - should fail
 	files := []string{
 		"test/folder/file1.jpg",
 		"test/folder/file2.jpg",
@@ -152,15 +152,30 @@ func TestLocalStorage_DeleteFolder(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	// Delete the folder
+	// Try to delete non-empty folder - should error
 	err = storage.DeleteFolder(context.Background(), "test/folder")
-	assert.NoError(t, err)
+	assert.Error(t, err, "should not delete non-empty folder")
+	assert.Contains(t, err.Error(), "not empty")
 
-	// Verify files are deleted
+	// Verify files still exist
 	for _, key := range files {
 		exists, _ := storage.Exists(context.Background(), key)
-		assert.False(t, exists)
+		assert.True(t, exists, "files should still exist after failed folder deletion")
 	}
+
+	// Test 2: Delete all files, then folder should succeed
+	for _, key := range files {
+		err = storage.Delete(context.Background(), key)
+		assert.NoError(t, err)
+	}
+
+	// Delete subfolder first (bottom-up deletion)
+	err = storage.DeleteFolder(context.Background(), "test/folder/subfolder")
+	assert.NoError(t, err)
+
+	// Now delete the main folder - should succeed
+	err = storage.DeleteFolder(context.Background(), "test/folder")
+	assert.NoError(t, err)
 }
 
 func TestLocalStorage_GeneratePresignedURL(t *testing.T) {

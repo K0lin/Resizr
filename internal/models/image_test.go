@@ -102,7 +102,7 @@ func TestImageMetadata_GetStorageKey(t *testing.T) {
 		expected   string
 	}{
 		{"original", "images/test-uuid/original.jpg"},
-		{"thumbnail", "images/test-uuid/thumbnail.jpg"},
+		{"thumbnail", "images/test-uuid/150x150.jpg"}, // thumbnail resolves to 150x150
 		{"800x600", "images/test-uuid/800x600.jpg"},
 	}
 
@@ -672,7 +672,8 @@ func TestEdgeCases(t *testing.T) {
 			key := metadata.GetStorageKey("thumbnail")
 
 			if tc.expected != "" {
-				assert.Contains(t, key, "thumbnail."+tc.expected)
+				// thumbnail resolves to 150x150, not "thumbnail"
+				assert.Contains(t, key, "150x150."+tc.expected)
 			}
 		}
 	})
@@ -797,11 +798,11 @@ func TestResolutionAliases(t *testing.T) {
 			resolution string
 			expected   string
 		}{
-			{"thumbnail", "images/test-id/thumbnail.jpg"},
-			{"small", "images/test-id/100x100.jpg"},   // Alias resolves to dimensions
-			{"medium", "images/test-id/800x600.jpg"},  // Alias resolves to dimensions
-			{"100x100", "images/test-id/100x100.jpg"}, // Direct dimensions
-			{"800x600", "images/test-id/800x600.jpg"}, // Direct dimensions
+			{"thumbnail", "images/test-id/150x150.jpg"}, // thumbnail resolves to 150x150
+			{"small", "images/test-id/100x100.jpg"},     // Alias resolves to dimensions
+			{"medium", "images/test-id/800x600.jpg"},    // Alias resolves to dimensions
+			{"100x100", "images/test-id/100x100.jpg"},   // Direct dimensions
+			{"800x600", "images/test-id/800x600.jpg"},   // Direct dimensions
 			{"original", "images/test-id/original.jpg"},
 		}
 
@@ -822,7 +823,7 @@ func TestResolutionAliases(t *testing.T) {
 			input    string
 			expected string
 		}{
-			{"thumbnail", "thumbnail"},     // Direct match
+			{"thumbnail", "150x150"},       // thumbnail resolves to 150x150
 			{"small", "100x100"},           // Alias resolves to dimensions
 			{"medium", "800x600"},          // Alias resolves to dimensions
 			{"100x100", "100x100"},         // Direct dimensions
@@ -847,7 +848,7 @@ func TestResolutionAliases(t *testing.T) {
 			input    string
 			expected string
 		}{
-			{"thumbnail", "thumbnail"},     // Predefined resolution
+			{"thumbnail", "150x150"},       // thumbnail resolves to 150x150
 			{"small", "100x100"},           // Alias resolves to dimensions
 			{"medium", "800x600"},          // Alias resolves to dimensions
 			{"100x100", "100x100"},         // Already dimensions
@@ -917,8 +918,8 @@ func TestResolutionAliases(t *testing.T) {
 		assert.True(t, metadata.HasResolution("100x100"))
 		assert.True(t, metadata.HasResolution("800x600"))
 
-		// Storage keys should work as before
-		assert.Equal(t, "images/test-id/thumbnail.jpg", metadata.GetStorageKey("thumbnail"))
+		// Storage keys should work as before (thumbnail now resolves to 150x150)
+		assert.Equal(t, "images/test-id/150x150.jpg", metadata.GetStorageKey("thumbnail"))
 		assert.Equal(t, "images/test-id/100x100.jpg", metadata.GetStorageKey("100x100"))
 		assert.Equal(t, "images/test-id/800x600.jpg", metadata.GetStorageKey("800x600"))
 

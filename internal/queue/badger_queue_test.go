@@ -135,7 +135,7 @@ func TestBadgerQueue_MoveToDLQ(t *testing.T) {
 	queue, cleanup := setupBadgerQueue(t)
 	defer cleanup()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 
 	// Enqueue a message
 	msg := &DeletionMessage{
@@ -164,13 +164,20 @@ func TestBadgerQueue_MoveToDLQ(t *testing.T) {
 		t.Fatal("Timeout waiting for message")
 	}
 
-	// Move to DLQ
-	err = queue.MoveToDLQ(ctx, receivedMsg, "max_retries_exceeded")
+	// Cancel context to stop the consumer goroutine
+	cancel()
+
+	// Give the consumer goroutine time to stop
+	time.Sleep(150 * time.Millisecond)
+
+	// Move to DLQ (use new context)
+	err = queue.MoveToDLQ(context.Background(), receivedMsg, "max_retries_exceeded")
 	assert.NoError(t, err)
 
 	// Verify message is no longer in processing and moved to DLQ
-	stats, err := queue.GetStats(ctx)
+	stats, err := queue.GetStats(context.Background())
 	require.NoError(t, err)
+
 	assert.Equal(t, int64(0), stats.QueueSize)  // Main queue should be empty
 	assert.Equal(t, int64(0), stats.Processing) // Processing should be empty
 	assert.Equal(t, int64(1), stats.DLQSize)    // Should be in DLQ

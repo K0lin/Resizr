@@ -181,6 +181,17 @@ func (m *MockDeletionRepository) AddHashReference(ctx context.Context, hash mode
 }
 
 func (m *MockDeletionRepository) RemoveHashReference(ctx context.Context, hash models.ImageHash, imageID string) error {
+	if m.dedupInfo != nil {
+		// Simulate removing the reference
+		newRefs := []string{}
+		for _, ref := range m.dedupInfo.ReferencingIDs {
+			if ref != imageID {
+				newRefs = append(newRefs, ref)
+			}
+		}
+		m.dedupInfo.ReferencingIDs = newRefs
+		m.dedupInfo.ReferenceCount = len(newRefs)
+	}
 	return nil
 }
 
@@ -259,7 +270,7 @@ func TestDeleteImage_WithDeduplication_LastReference(t *testing.T) {
 	}
 
 	repo.metadata = &models.ImageMetadata{
-		ID:            "image-1",
+		ID:            "f47ac10b-58cc-4372-a567-0e02b2c3d479",
 		Filename:      "test.jpg",
 		Hash:          hash,
 		IsDeduped:     true,
@@ -270,7 +281,7 @@ func TestDeleteImage_WithDeduplication_LastReference(t *testing.T) {
 	dedupRepo.dedupInfo = &models.DeduplicationInfo{
 		Hash:           hash,
 		MasterImageID:  "image-master",
-		ReferencingIDs: []string{"image-1"},
+		ReferencingIDs: []string{"f47ac10b-58cc-4372-a567-0e02b2c3d479"},
 		ReferenceCount: 1,
 	}
 
@@ -290,7 +301,7 @@ func TestDeleteImage_WithDeduplication_LastReference(t *testing.T) {
 	service := NewImageService(repo, dedupRepo, storage, &mockProcessorService{}, cfg)
 	ctx := context.Background()
 
-	err := service.DeleteImage(ctx, "image-1")
+	err := service.DeleteImage(ctx, "f47ac10b-58cc-4372-a567-0e02b2c3d479")
 	require.NoError(t, err)
 
 	// Verify storage delete was called
@@ -309,7 +320,7 @@ func TestDeleteImage_WithDeduplication_SharedReferences(t *testing.T) {
 	}
 
 	repo.metadata = &models.ImageMetadata{
-		ID:            "image-1",
+		ID:            "f47ac10b-58cc-4372-a567-0e02b2c3d479",
 		Filename:      "test.jpg",
 		Hash:          hash,
 		IsDeduped:     true,
@@ -320,7 +331,7 @@ func TestDeleteImage_WithDeduplication_SharedReferences(t *testing.T) {
 	dedupRepo.dedupInfo = &models.DeduplicationInfo{
 		Hash:           hash,
 		MasterImageID:  "image-master",
-		ReferencingIDs: []string{"image-1", "image-2"},
+		ReferencingIDs: []string{"f47ac10b-58cc-4372-a567-0e02b2c3d479", "image-2"},
 		ReferenceCount: 2,
 	}
 
@@ -339,7 +350,7 @@ func TestDeleteImage_WithDeduplication_SharedReferences(t *testing.T) {
 	service := NewImageService(repo, dedupRepo, storage, &mockProcessorService{}, cfg)
 	ctx := context.Background()
 
-	err := service.DeleteImage(ctx, "image-1")
+	err := service.DeleteImage(ctx, "f47ac10b-58cc-4372-a567-0e02b2c3d479")
 	require.NoError(t, err)
 
 	// Verify storage delete was NOT called (files still shared)
@@ -358,7 +369,7 @@ func TestDeleteResolution_WithDeduplication(t *testing.T) {
 	}
 
 	repo.metadata = &models.ImageMetadata{
-		ID:            "image-1",
+		ID:            "f47ac10b-58cc-4372-a567-0e02b2c3d479",
 		Filename:      "test.jpg",
 		Hash:          hash,
 		IsDeduped:     true,
@@ -380,7 +391,7 @@ func TestDeleteResolution_WithDeduplication(t *testing.T) {
 	service := NewImageService(repo, dedupRepo, storage, &mockProcessorService{}, cfg)
 	ctx := context.Background()
 
-	err := service.DeleteResolution(ctx, "image-1", "thumbnail")
+	err := service.DeleteResolution(ctx, "f47ac10b-58cc-4372-a567-0e02b2c3d479", "thumbnail")
 	require.NoError(t, err)
 
 	// Verify storage delete was called
@@ -397,7 +408,7 @@ func TestDeleteResolution_CannotDeleteOriginal(t *testing.T) {
 	dedupRepo := &MockDeletionRepository{}
 
 	repo.metadata = &models.ImageMetadata{
-		ID:          "image-1",
+		ID:          "f47ac10b-58cc-4372-a567-0e02b2c3d479",
 		Filename:    "test.jpg",
 		Resolutions: []string{"thumbnail"},
 	}
@@ -411,7 +422,7 @@ func TestDeleteResolution_CannotDeleteOriginal(t *testing.T) {
 	service := NewImageService(repo, dedupRepo, storage, &mockProcessorService{}, cfg)
 	ctx := context.Background()
 
-	err := service.DeleteResolution(ctx, "image-1", "original")
+	err := service.DeleteResolution(ctx, "f47ac10b-58cc-4372-a567-0e02b2c3d479", "original")
 	require.Error(t, err)
 
 	// Should be validation error
@@ -425,7 +436,7 @@ func TestDeleteResolution_NotFound(t *testing.T) {
 	dedupRepo := &MockDeletionRepository{}
 
 	repo.metadata = &models.ImageMetadata{
-		ID:          "image-1",
+		ID:          "f47ac10b-58cc-4372-a567-0e02b2c3d479",
 		Filename:    "test.jpg",
 		Resolutions: []string{"thumbnail"},
 	}
@@ -439,7 +450,7 @@ func TestDeleteResolution_NotFound(t *testing.T) {
 	service := NewImageService(repo, dedupRepo, storage, &mockProcessorService{}, cfg)
 	ctx := context.Background()
 
-	err := service.DeleteResolution(ctx, "image-1", "nonexistent")
+	err := service.DeleteResolution(ctx, "f47ac10b-58cc-4372-a567-0e02b2c3d479", "nonexistent")
 	require.Error(t, err)
 
 	// Should be not found error

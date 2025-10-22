@@ -893,6 +893,7 @@ func TestUploadResult_Structure(t *testing.T) {
 
 func TestImageService_DeleteResolution(t *testing.T) {
 	t.Run("successful_deletion", func(t *testing.T) {
+		var updatedMetadata *models.ImageMetadata
 		mockRepo := &testutil.MockImageRepository{
 			GetFunc: func(ctx context.Context, id string) (*models.ImageMetadata, error) {
 				return &models.ImageMetadata{
@@ -902,6 +903,7 @@ func TestImageService_DeleteResolution(t *testing.T) {
 				}, nil
 			},
 			UpdateFunc: func(ctx context.Context, metadata *models.ImageMetadata) error {
+				updatedMetadata = metadata
 				return nil
 			},
 		}
@@ -918,6 +920,12 @@ func TestImageService_DeleteResolution(t *testing.T) {
 
 		err := service.DeleteResolution(context.Background(), testutil.ValidUUID, "800x600")
 		assert.NoError(t, err)
+
+		// Verify the resolution was removed from metadata
+		assert.NotNil(t, updatedMetadata, "metadata should have been updated")
+		assert.NotContains(t, updatedMetadata.Resolutions, "800x600", "deleted resolution should not be in metadata")
+		assert.Contains(t, updatedMetadata.Resolutions, "original", "original should still be present")
+		assert.Contains(t, updatedMetadata.Resolutions, "thumbnail", "thumbnail should still be present")
 	})
 
 	t.Run("image_not_found", func(t *testing.T) {
@@ -981,6 +989,61 @@ func TestImageService_DeleteResolution(t *testing.T) {
 		assert.Error(t, err)
 		var validationErr models.ValidationError
 		assert.ErrorAs(t, err, &validationErr)
+	})
+
+	t.Run("delete_and_verify_metadata_updated", func(t *testing.T) {
+		// This test simulates the user's scenario: delete a resolution, then fetch info
+		testImageID := testutil.ValidUUID
+		originalMetadata := &models.ImageMetadata{
+			ID:          testImageID,
+			MimeType:    "image/jpeg",
+			Resolutions: []string{"original", "800x600", "100x100:test", "thumbnail"},
+		}
+
+		var storedMetadata *models.ImageMetadata
+		mockRepo := &testutil.MockImageRepository{
+			GetFunc: func(ctx context.Context, id string) (*models.ImageMetadata, error) {
+				if storedMetadata != nil {
+					// Return the updated metadata after deletion
+					return storedMetadata, nil
+				}
+				// Return original metadata on first call
+				return originalMetadata, nil
+			},
+			UpdateFunc: func(ctx context.Context, metadata *models.ImageMetadata) error {
+				storedMetadata = metadata
+				return nil
+			},
+		}
+
+		mockDeduplicationRepo := &testutil.MockDeduplicationRepository{}
+		mockStorage := &testutil.MockStorageProvider{
+			DeleteFunc: func(ctx context.Context, key string) error {
+				return nil
+			},
+		}
+		mockProcessor := &testProcessorService{}
+
+		service := NewImageService(mockRepo, mockDeduplicationRepo, mockStorage, mockProcessor, testConfig())
+
+		// Delete a resolution by alias
+		err := service.DeleteResolution(context.Background(), testImageID, "test")
+		assert.NoError(t, err)
+
+		// Verify metadata was updated
+		assert.NotNil(t, storedMetadata, "metadata should have been updated")
+		assert.NotContains(t, storedMetadata.Resolutions, "100x100:test", "deleted resolution should not be in metadata")
+
+		// Now fetch metadata (simulating GET /info)
+		fetchedMetadata, err := service.GetMetadata(context.Background(), testImageID)
+		assert.NoError(t, err)
+		assert.NotNil(t, fetchedMetadata)
+
+		// The fetched metadata should not contain the deleted resolution
+		assert.NotContains(t, fetchedMetadata.Resolutions, "100x100:test", "deleted resolution should not appear in fetched metadata")
+		assert.Contains(t, fetchedMetadata.Resolutions, "original", "original should still be present")
+		assert.Contains(t, fetchedMetadata.Resolutions, "800x600", "800x600 should still be present")
+		assert.Contains(t, fetchedMetadata.Resolutions, "thumbnail", "thumbnail should still be present")
 	})
 }
 

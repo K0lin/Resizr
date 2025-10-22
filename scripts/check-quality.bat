@@ -197,7 +197,7 @@ echo.
 set /a TOTAL_CHECKS=PASSED+FAILED
 
 if !FAILED!==0 (
-    echo [OK] All checks passed! ^(!PASSED!/!TOTAL_CHECKS!^)
+    echo [OK] All checks passed ^(!PASSED!/!TOTAL_CHECKS!^)
     echo.
     echo   Your code is ready to commit!
     set EXIT_CODE=0

@@ -104,7 +104,7 @@ func (s *LocalStorage) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-// DeleteFolder removes a folder from the local filesystem
+// DeleteFolder removes a folder from the local filesystem ONLY if it's empty
 func (s *LocalStorage) DeleteFolder(ctx context.Context, prefix string) error {
 	path := filepath.Join(s.directory, prefix)
 
@@ -125,9 +125,25 @@ func (s *LocalStorage) DeleteFolder(ctx context.Context, prefix string) error {
 		return fmt.Errorf("invalid path: %q escapes from storage root", prefix)
 	}
 
-	err = os.RemoveAll(absPath)
+	// Check if folder is empty before deleting
+	entries, err := os.ReadDir(absPath)
 	if err != nil {
-		return fmt.Errorf("failed to delete folder: %w", err)
+		if os.IsNotExist(err) {
+			// Folder doesn't exist, nothing to delete
+			return nil
+		}
+		return fmt.Errorf("failed to read folder: %w", err)
+	}
+
+	// Only delete if folder is empty
+	if len(entries) > 0 {
+		return fmt.Errorf("folder not empty: contains %d files/folders", len(entries))
+	}
+
+	// Folder is empty, safe to delete
+	err = os.Remove(absPath)
+	if err != nil {
+		return fmt.Errorf("failed to delete empty folder: %w", err)
 	}
 	return nil
 }
