@@ -283,7 +283,17 @@ func (s *ImageServiceImpl) ProcessUpload(ctx context.Context, input UploadInput)
 
 	for _, resolutionName := range allResolutions {
 		// Skip duplicates
-		if metadata.HasResolution(resolutionName) {
+		hasRes := metadata.HasResolution(resolutionName)
+		logger.DebugWithContext(ctx, "Checking resolution for upload",
+			zap.String("image_id", imageID),
+			zap.String("resolution", resolutionName),
+			zap.Bool("has_resolution", hasRes),
+			zap.Strings("existing_resolutions", metadata.Resolutions))
+
+		if hasRes {
+			logger.InfoWithContext(ctx, "Skipping duplicate resolution",
+				zap.String("image_id", imageID),
+				zap.String("resolution", resolutionName))
 			continue
 		}
 
@@ -325,7 +335,18 @@ func (s *ImageServiceImpl) ProcessUpload(ctx context.Context, input UploadInput)
 
 		// Only add to metadata and processed list if processing succeeded (or wasn't needed)
 		if processingSucceeded {
+			logger.DebugWithContext(ctx, "Adding resolution to metadata",
+				zap.String("image_id", imageID),
+				zap.String("resolution", resolutionName),
+				zap.Strings("current_resolutions", metadata.Resolutions))
+
 			metadata.AddResolution(resolutionName)
+
+			logger.DebugWithContext(ctx, "Resolution added to metadata",
+				zap.String("image_id", imageID),
+				zap.String("resolution", resolutionName),
+				zap.Strings("updated_resolutions", metadata.Resolutions))
+
 			processedResolutions = append(processedResolutions, resolutionName)
 		} else {
 			// Skip adding to deduplication tracking if processing failed
@@ -499,6 +520,15 @@ func (s *ImageServiceImpl) DeleteImage(ctx context.Context, imageID string) erro
 
 	// Handle deduplication cleanup with atomic operations
 	if metadata.Hash.Value != "" {
+		// Remove the main hash reference first
+		if err := s.dedupRepo.RemoveHashReference(ctx, metadata.Hash, imageID); err != nil {
+			logger.ErrorWithContext(ctx, "Failed to remove hash reference",
+				zap.String("image_id", imageID),
+				zap.String("hash", metadata.Hash.String()),
+				zap.Error(err))
+			// Continue with best-effort cleanup, as resolution refs might still need cleanup
+		}
+
 		// Atomically decrement references for all resolutions
 		refCounts, err := s.dedupRepo.DecrementResolutionRefs(ctx, metadata.Hash, imageID, allResolutions)
 		if err != nil {
@@ -625,12 +655,18 @@ func (s *ImageServiceImpl) DeleteImage(ctx context.Context, imageID string) erro
 			deletedResolutions = append(deletedResolutions, resolution)
 		}
 
-		// Delete folder
-		folderPrefix := fmt.Sprintf("images/%s", imageID)
-		if err := s.storage.DeleteFolder(ctx, folderPrefix); err != nil {
-			logger.WarnWithContext(ctx, "Failed to delete image folder",
-				zap.String("folder", folderPrefix),
-				zap.Error(err))
+		// Delete folder only in sync mode
+		// In async mode, the deletion workers will clean up empty folders
+		if !s.config.Deletion.AsyncMode {
+			folderPrefix := fmt.Sprintf("images/%s", imageID)
+			if err := s.storage.DeleteFolder(ctx, folderPrefix); err != nil {
+				logger.WarnWithContext(ctx, "Failed to delete image folder",
+					zap.String("folder", folderPrefix),
+					zap.Error(err))
+			} else {
+				logger.InfoWithContext(ctx, "Deleted image folder",
+					zap.String("folder", folderPrefix))
+			}
 		}
 	}
 
@@ -738,13 +774,44 @@ func (s *ImageServiceImpl) DeleteResolution(ctx context.Context, imageID, resolu
 		}
 	}
 
+	// Find the actual resolution name stored in metadata
+	// User might request by alias ("test") but we need the full resolution ("100x100:test")
+	var actualResolution string
+	for _, res := range metadata.Resolutions {
+		// Check if this resolution matches (exact match, alias match, or dimensions match)
+		if res == resolution {
+			actualResolution = res
+			break
+		}
+		// Check if user accessed by alias
+		if alias := models.ExtractAlias(res); alias != "" && alias == resolution {
+			actualResolution = res
+			break
+		}
+		// Check if user accessed by dimensions when resolution has alias
+		if dimensions := models.ExtractDimensions(res); dimensions != res && dimensions == resolution {
+			actualResolution = res
+			break
+		}
+	}
+
+	if actualResolution == "" {
+		// Shouldn't happen since HasResolution returned true, but be defensive
+		actualResolution = resolution
+	}
+
+	logger.InfoWithContext(ctx, "Deleting resolution",
+		zap.String("image_id", imageID),
+		zap.String("requested_resolution", resolution),
+		zap.String("actual_resolution", actualResolution))
+
 	var physicallyDeleted bool
 	var remainingRefs int64
 
 	// Handle deduplication with atomic reference counting
 	if metadata.Hash.Value != "" {
-		// Atomically decrement reference for this resolution
-		refCounts, err := s.dedupRepo.DecrementResolutionRefs(ctx, metadata.Hash, imageID, []string{resolution})
+		// Atomically decrement reference for this resolution (use actual resolution name from metadata)
+		refCounts, err := s.dedupRepo.DecrementResolutionRefs(ctx, metadata.Hash, imageID, []string{actualResolution})
 		if err != nil {
 			logger.ErrorWithContext(ctx, "Failed to decrement resolution reference",
 				zap.String("image_id", imageID),
@@ -753,11 +820,11 @@ func (s *ImageServiceImpl) DeleteResolution(ctx context.Context, imageID, resolu
 			return fmt.Errorf("failed to decrement resolution reference: %w", err)
 		}
 
-		refCount, exists := refCounts[resolution]
+		refCount, exists := refCounts[actualResolution]
 		if !exists {
 			logger.WarnWithContext(ctx, "No reference count returned for resolution",
 				zap.String("image_id", imageID),
-				zap.String("resolution", resolution))
+				zap.String("resolution", actualResolution))
 			refCount = &repository.ResolutionRefCount{Count: 0, ShouldDelete: false}
 		}
 
@@ -765,26 +832,26 @@ func (s *ImageServiceImpl) DeleteResolution(ctx context.Context, imageID, resolu
 
 		logger.InfoWithContext(ctx, "Resolution reference decremented",
 			zap.String("image_id", imageID),
-			zap.String("resolution", resolution),
+			zap.String("resolution", actualResolution),
 			zap.Int64("remaining_refs", remainingRefs),
 			zap.Bool("should_delete", refCount.ShouldDelete))
 
 		// Delete physical file if no more references
 		if refCount.ShouldDelete {
-			storageKey := metadata.GetActualStorageKey(resolution)
+			storageKey := metadata.GetActualStorageKey(actualResolution)
 
 			// Check if async deletion is enabled
 			if s.config.Deletion.AsyncMode && s.deletionQueue != nil && s.intentMgr != nil {
 				// Async deletion via queue
-				if err := s.enqueueDeletion(ctx, imageID, resolution, storageKey, metadata.Hash.String()); err != nil {
+				if err := s.enqueueDeletion(ctx, imageID, actualResolution, storageKey, metadata.Hash.String()); err != nil {
 					logger.ErrorWithContext(ctx, "Failed to enqueue deletion",
 						zap.String("image_id", imageID),
-						zap.String("resolution", resolution),
+						zap.String("resolution", actualResolution),
 						zap.Error(err))
 					// Fallback to sync deletion
 					if err := s.storage.Delete(ctx, storageKey); err != nil {
 						logger.WarnWithContext(ctx, "Failed to delete resolution (sync fallback)",
-							zap.String("resolution", resolution),
+							zap.String("resolution", actualResolution),
 							zap.Error(err))
 					} else {
 						physicallyDeleted = true
@@ -793,40 +860,40 @@ func (s *ImageServiceImpl) DeleteResolution(ctx context.Context, imageID, resolu
 					// Queued for deletion (not immediate)
 					physicallyDeleted = false
 					logger.InfoWithContext(ctx, "Resolution deletion queued",
-						zap.String("resolution", resolution))
+						zap.String("resolution", actualResolution))
 				}
 			} else {
 				// Synchronous deletion
 				if err := s.storage.Delete(ctx, storageKey); err != nil {
 					logger.WarnWithContext(ctx, "Failed to delete resolution",
-						zap.String("resolution", resolution),
+						zap.String("resolution", actualResolution),
 						zap.Error(err))
 				} else {
 					physicallyDeleted = true
 					logger.InfoWithContext(ctx, "Resolution physically deleted",
-						zap.String("resolution", resolution))
+						zap.String("resolution", actualResolution))
 				}
 			}
 		} else {
 			logger.InfoWithContext(ctx, "Resolution kept (still referenced by other images)",
 				zap.String("image_id", imageID),
-				zap.String("resolution", resolution),
+				zap.String("resolution", actualResolution),
 				zap.Int64("remaining_refs", remainingRefs))
 		}
 	} else {
 		// Non-deduplicated image - delete directly
-		storageKey := metadata.GetStorageKey(resolution)
+		storageKey := metadata.GetStorageKey(actualResolution)
 
 		if s.config.Deletion.AsyncMode && s.deletionQueue != nil && s.intentMgr != nil {
 			// Async deletion
-			if err := s.enqueueDeletion(ctx, imageID, resolution, storageKey, ""); err != nil {
+			if err := s.enqueueDeletion(ctx, imageID, actualResolution, storageKey, ""); err != nil {
 				logger.ErrorWithContext(ctx, "Failed to enqueue deletion",
-					zap.String("resolution", resolution),
+					zap.String("resolution", actualResolution),
 					zap.Error(err))
 				// Fallback to sync
 				if err := s.storage.Delete(ctx, storageKey); err != nil {
 					logger.WarnWithContext(ctx, "Failed to delete resolution",
-						zap.String("resolution", resolution),
+						zap.String("resolution", actualResolution),
 						zap.Error(err))
 				} else {
 					physicallyDeleted = true
@@ -836,7 +903,7 @@ func (s *ImageServiceImpl) DeleteResolution(ctx context.Context, imageID, resolu
 			// Sync deletion
 			if err := s.storage.Delete(ctx, storageKey); err != nil {
 				logger.WarnWithContext(ctx, "Failed to delete resolution",
-					zap.String("resolution", resolution),
+					zap.String("resolution", actualResolution),
 					zap.Error(err))
 			} else {
 				physicallyDeleted = true
@@ -847,7 +914,7 @@ func (s *ImageServiceImpl) DeleteResolution(ctx context.Context, imageID, resolu
 	// Remove resolution from metadata
 	newResolutions := []string{}
 	for _, res := range metadata.Resolutions {
-		if res != resolution {
+		if res != actualResolution {
 			newResolutions = append(newResolutions, res)
 		}
 	}
@@ -865,7 +932,7 @@ func (s *ImageServiceImpl) DeleteResolution(ctx context.Context, imageID, resolu
 
 	logger.InfoWithContext(ctx, "Resolution deletion completed",
 		zap.String("image_id", imageID),
-		zap.String("resolution", resolution),
+		zap.String("resolution", actualResolution),
 		zap.Bool("physically_deleted", physicallyDeleted),
 		zap.Int64("remaining_references", remainingRefs),
 		zap.Bool("async_mode", s.config.Deletion.AsyncMode))

@@ -152,27 +152,31 @@ func (im *ImageMetadata) GetDimensions() DimensionInfo {
 	}
 }
 
-// HasResolution checks if a specific resolution exists (by dimensions or alias)
+// HasResolution checks if a resolution already exists in the metadata
+// This prevents duplicate resolutions and handles both exact matches and dimension-based matches
 func (im *ImageMetadata) HasResolution(resolution string) bool {
-	// Don't allow access via the full "dimensions:alias" format from API
+	// Block access via "dimensions:alias" format to prevent bypassing intent system
 	if strings.Contains(resolution, ":") {
 		return false
 	}
 
 	for _, res := range im.Resolutions {
-		// Direct match for legacy resolutions (no colon)
+		// Check for exact match
 		if res == resolution {
 			return true
 		}
-		// Check if resolution matches an alias
+
+		// Check for alias match
 		if alias := ExtractAlias(res); alias != "" && alias == resolution {
 			return true
 		}
-		// Check if resolution matches dimensions part of an aliased resolution
+
+		// Check if this is a dimension-only query matching a resolution with an alias
 		if dimensions := ExtractDimensions(res); dimensions != res && dimensions == resolution {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -207,25 +211,37 @@ func (im *ImageMetadata) GetStorageKey(resolution string) string {
 
 // ResolveToDimensions resolves any resolution (alias or dimensions) to pure dimensions for storage
 func (im *ImageMetadata) ResolveToDimensions(resolution string) string {
+	// First, extract dimensions part if resolution includes an alias (e.g., "100x100:test" -> "100x100")
+	dimensions := ExtractDimensions(resolution)
+
 	// If it's already in pure dimensions format, return as-is
-	if IsValidDimensionFormat(resolution) {
+	if IsValidDimensionFormat(dimensions) {
+		return dimensions
+	}
+
+	// Check if it's a predefined resolution (e.g., "thumbnail")
+	// Parse it to get the actual dimensions it resolves to
+	if resolution == "thumbnail" || resolution == "original" {
+		// Parse the resolution to get its actual dimensions
+		if parsed, err := ParseResolution(resolution); err == nil {
+			return fmt.Sprintf("%dx%d", parsed.Width, parsed.Height)
+		}
+		// If parsing fails (e.g., "original"), return as-is
 		return resolution
 	}
 
-	// Check if it's a predefined resolution
-	if resolution == "thumbnail" {
-		return "thumbnail"
-	}
-
 	// Search for the resolution by alias and return its dimensions
+	// This handles cases where user accesses by alias only (e.g., "test" -> find "100x100:test" -> return "100x100")
 	for _, res := range im.Resolutions {
 		if alias := ExtractAlias(res); alias != "" && alias == resolution {
 			return ExtractDimensions(res)
 		}
 	}
 
-	// Fallback: return as-is (shouldn't happen if HasResolution was called first)
-	return resolution
+	// Fallback: return dimensions extracted at the start
+	// If resolution was "100x100:test", dimensions will be "100x100"
+	// If resolution was just "test" and not found, dimensions will be "test"
+	return dimensions
 }
 
 // FindStoredResolution finds the actual stored resolution string for a given access resolution

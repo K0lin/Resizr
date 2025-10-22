@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"resizr/internal/queue"
@@ -111,6 +112,38 @@ func (w *DeletionWorker) processMessage(ctx context.Context, msg *queue.Deletion
 		zap.Int("retry_count", msg.RetryCount),
 		zap.Duration("queue_wait_time", queueWaitTime))
 
+	// Check intent status to prevent duplicate processing
+	intent, err := w.intent.GetIntent(ctx, msg.IntentID)
+	if err != nil {
+		logger.Error("Failed to get intent status",
+			zap.String("intent_id", msg.IntentID),
+			zap.Error(err))
+		// Nack and requeue for retry after 5 seconds
+		if nackErr := w.queue.Nack(ctx, msg.MessageID, 5*time.Second); nackErr != nil {
+			logger.Error("Failed to nack message",
+				zap.String("message_id", msg.MessageID),
+				zap.Error(nackErr))
+		}
+		return
+	}
+
+	// Skip if already processing or completed
+	if intent.Status == "processing" || intent.Status == "completed" {
+		logger.Warn("Intent already being processed or completed, skipping",
+			zap.String("intent_id", msg.IntentID),
+			zap.String("status", intent.Status),
+			zap.String("worker_id", intent.WorkerID))
+		// Acknowledge to remove from queue
+		if err := w.queue.Ack(ctx, msg.MessageID); err != nil {
+			logger.Error("Failed to acknowledge duplicate message",
+				zap.String("message_id", msg.MessageID),
+				zap.Error(err))
+		}
+		// Count as completed (duplicate)
+		w.metrics.DeletionCompleted.WithLabelValues(msg.Resolution).Inc()
+		return
+	}
+
 	// Update intent status to processing
 	if err := w.intent.UpdateStatus(ctx, msg.IntentID, "processing", w.id, ""); err != nil {
 		logger.Warn("Failed to update intent status to processing",
@@ -124,10 +157,10 @@ func (w *DeletionWorker) processMessage(ctx context.Context, msg *queue.Deletion
 	defer cancel()
 
 	// Execute S3 deletion
-	err := w.storage.Delete(deleteCtx, msg.StorageKey)
+	deleteErr := w.storage.Delete(deleteCtx, msg.StorageKey)
 
-	if err != nil {
-		w.handleDeletionError(ctx, msg, err)
+	if deleteErr != nil {
+		w.handleDeletionError(ctx, msg, deleteErr)
 		return
 	}
 
@@ -138,6 +171,23 @@ func (w *DeletionWorker) processMessage(ctx context.Context, msg *queue.Deletion
 			zap.String("message_id", msg.MessageID),
 			zap.Error(err))
 		// Don't return - message will be reprocessed but deletion is idempotent
+	}
+
+	// Try to clean up empty parent directory
+	// Extract the image folder from the storage key (e.g., "images/abc123/file.jpg" -> "images/abc123")
+	if folderPath := extractImageFolder(msg.StorageKey); folderPath != "" {
+		// Check if folder is empty and delete if so
+		if err := w.storage.DeleteFolder(ctx, folderPath); err != nil {
+			// Log as debug - folder might not be empty yet (other files still exist)
+			logger.Debug("Could not delete image folder (may not be empty yet)",
+				zap.String("folder", folderPath),
+				zap.String("storage_key", msg.StorageKey),
+				zap.Error(err))
+		} else {
+			logger.Debug("Deleted empty image folder",
+				zap.String("folder", folderPath),
+				zap.String("storage_key", msg.StorageKey))
+		}
 	}
 
 	// Update intent status to completed
@@ -235,6 +285,22 @@ func (w *DeletionWorker) handleDeletionError(ctx context.Context, msg *queue.Del
 // GetID returns the worker ID
 func (w *DeletionWorker) GetID() string {
 	return w.id
+}
+
+// extractImageFolder extracts the image folder path from a storage key
+// e.g., "images/abc-123/800x600.jpg" -> "images/abc-123"
+// e.g., "images/abc-123/original.jpg" -> "images/abc-123"
+func extractImageFolder(storageKey string) string {
+	// Split the path by separator
+	parts := strings.Split(storageKey, "/")
+
+	// We expect format: images/<image-id>/<filename>
+	if len(parts) >= 3 && parts[0] == "images" {
+		// Return images/<image-id>
+		return parts[0] + "/" + parts[1]
+	}
+
+	return ""
 }
 
 // Health checks worker health

@@ -676,6 +676,7 @@ func TestLoad_ValidationError(t *testing.T) {
 	clearEnv()
 
 	// Set incomplete configuration (missing required S3 fields)
+	_ = os.Setenv("STORAGE_PROVIDER", "s3")
 	_ = os.Setenv("S3_BUCKET", "test-bucket")
 	// Missing S3_ACCESS_KEY and S3_SECRET_KEY
 	defer clearEnv()
@@ -683,7 +684,7 @@ func TestLoad_ValidationError(t *testing.T) {
 	_, err := Load()
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "configuration validation failed")
+	assert.Contains(t, err.Error(), "S3_ACCESS_KEY is required")
 }
 
 func TestResolutionConfig(t *testing.T) {

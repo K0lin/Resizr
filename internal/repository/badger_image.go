@@ -748,7 +748,7 @@ func (b *BadgerImageRepository) GetResolutionStatistics(ctx context.Context) ([]
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
 
-		prefix := []byte("img:")
+		prefix := []byte("image:metadata:")
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			item := it.Item()
 
@@ -841,14 +841,16 @@ func (b *BadgerImageRepository) GetImagesByTimeRange(ctx context.Context, start,
 // GetStorageUsageByResolution returns storage usage per resolution
 func (b *BadgerImageRepository) GetStorageUsageByResolution(ctx context.Context) (map[string]int64, error) {
 	storageByResolution := make(map[string]int64)
+	var imageCount int64
 
 	err := b.db.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
 
-		prefix := []byte("img:")
+		prefix := []byte("image:metadata:")
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			item := it.Item()
+			imageCount++
 
 			err := item.Value(func(val []byte) error {
 				var metadata models.ImageMetadata
@@ -885,6 +887,10 @@ func (b *BadgerImageRepository) GetStorageUsageByResolution(ctx context.Context)
 	if err != nil {
 		return nil, err
 	}
+
+	logger.DebugWithContext(ctx, "Calculated storage usage",
+		zap.Int64("image_count", imageCount),
+		zap.Any("storage_by_resolution", storageByResolution))
 
 	return storageByResolution, nil
 }
@@ -1087,78 +1093,86 @@ func (b *BadgerImageRepository) GetStorageSavedByDeduplication(ctx context.Conte
 func (b *BadgerImageRepository) DecrementResolutionRefs(ctx context.Context, hash models.ImageHash, imageID string, resolutions []string) (map[string]*ResolutionRefCount, error) {
 	results := make(map[string]*ResolutionRefCount)
 
-	// Use Badger's managed transaction with automatic retry
-	err := b.db.Update(func(txn *badger.Txn) error {
-		for _, resolution := range resolutions {
-			refKey := fmt.Sprintf("dedup:res_refs:%s:%s", hash.GetHashKey(), resolution)
+	// Use Badger's managed transaction with manual retry for conflicts
+	var err error
+	for i := 0; i < 5; i++ { // Retry up to 5 times
+		err = b.db.Update(func(txn *badger.Txn) error {
+			for _, resolution := range resolutions {
+				refKey := fmt.Sprintf("dedup:res_refs:%s:%s", hash.GetHashKey(), resolution)
 
-			// Read current IDs
-			var imageIDs []string
-			item, err := txn.Get([]byte(refKey))
-			if err == badger.ErrKeyNotFound {
-				// No references exist, count is 0
-				results[resolution] = &ResolutionRefCount{
-					Count:          0,
-					ReferencingIDs: []string{},
-					ShouldDelete:   true,
+				// Read current IDs
+				var imageIDs []string
+				item, err := txn.Get([]byte(refKey))
+				if err == badger.ErrKeyNotFound {
+					// No references exist, count is 0
+					results[resolution] = &ResolutionRefCount{
+						Count:          0,
+						ReferencingIDs: []string{},
+						ShouldDelete:   true,
+					}
+					continue
+				} else if err != nil {
+					return fmt.Errorf("failed to read resolution refs for %s: %w", resolution, err)
 				}
-				continue
-			} else if err != nil {
-				return fmt.Errorf("failed to read resolution refs for %s: %w", resolution, err)
-			}
 
-			// Deserialize IDs
-			err = item.Value(func(val []byte) error {
-				return json.Unmarshal(val, &imageIDs)
-			})
-			if err != nil {
-				return fmt.Errorf("failed to unmarshal resolution refs: %w", err)
-			}
-
-			// Remove imageID from list
-			newIDs := make([]string, 0, len(imageIDs))
-			for _, id := range imageIDs {
-				if id != imageID {
-					newIDs = append(newIDs, id)
-				}
-			}
-
-			newCount := int64(len(newIDs))
-
-			// Update or delete the key
-			if newCount == 0 {
-				// No more references, delete the key
-				if err := txn.Delete([]byte(refKey)); err != nil {
-					return fmt.Errorf("failed to delete empty resolution ref: %w", err)
-				}
-			} else {
-				// Update with new list
-				data, err := json.Marshal(newIDs)
+				// Deserialize IDs
+				err = item.Value(func(val []byte) error {
+					return json.Unmarshal(val, &imageIDs)
+				})
 				if err != nil {
-					return fmt.Errorf("failed to marshal resolution refs: %w", err)
+					return fmt.Errorf("failed to unmarshal resolution refs: %w", err)
 				}
 
-				if err := txn.Set([]byte(refKey), data); err != nil {
-					return fmt.Errorf("failed to update resolution refs: %w", err)
+				// Remove imageID from list
+				newIDs := make([]string, 0, len(imageIDs))
+				for _, id := range imageIDs {
+					if id != imageID {
+						newIDs = append(newIDs, id)
+					}
 				}
+
+				newCount := int64(len(newIDs))
+
+				// Update or delete the key
+				if newCount == 0 {
+					// No more references, delete the key
+					if err := txn.Delete([]byte(refKey)); err != nil {
+						return fmt.Errorf("failed to delete empty resolution ref: %w", err)
+					}
+				} else {
+					// Update with new list
+					data, err := json.Marshal(newIDs)
+					if err != nil {
+						return fmt.Errorf("failed to marshal resolution refs: %w", err)
+					}
+
+					if err := txn.Set([]byte(refKey), data); err != nil {
+						return fmt.Errorf("failed to update resolution refs: %w", err)
+					}
+				}
+
+				results[resolution] = &ResolutionRefCount{
+					Count:          newCount,
+					ReferencingIDs: newIDs,
+					ShouldDelete:   newCount == 0,
+				}
+
+				logger.Debug("Resolution reference decremented (Badger)",
+					zap.String("hash", hash.String()),
+					zap.String("resolution", resolution),
+					zap.String("image_id", imageID),
+					zap.Int64("new_count", newCount),
+					zap.Bool("should_delete", newCount == 0))
 			}
 
-			results[resolution] = &ResolutionRefCount{
-				Count:          newCount,
-				ReferencingIDs: newIDs,
-				ShouldDelete:   newCount == 0,
-			}
+			return nil
+		})
 
-			logger.Debug("Resolution reference decremented (Badger)",
-				zap.String("hash", hash.String()),
-				zap.String("resolution", resolution),
-				zap.String("image_id", imageID),
-				zap.Int64("new_count", newCount),
-				zap.Bool("should_delete", newCount == 0))
+		if err != badger.ErrConflict {
+			break
 		}
-
-		return nil
-	})
+		time.Sleep(10 * time.Millisecond) // Wait before retrying
+	}
 
 	if err != nil {
 		logger.Error("Failed to decrement resolution refs (Badger)",

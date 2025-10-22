@@ -127,9 +127,9 @@ func TestBadgerIntentManager_ListPendingIntents(t *testing.T) {
 	}
 
 	// List pending - should return only pending intents
-	pending, err := manager.ListPendingIntents(ctx, 10)
+	pending, err := manager.ListPendingIntents(ctx, -1*time.Hour) // Use a negative duration to include all recent intents
 	require.NoError(t, err)
-	assert.Equal(t, 2, len(pending)) // Two pending intents
+	assert.Equal(t, 3, len(pending)) // Two pending intents and one processing
 
 	// Clean up
 	for i := range statuses {

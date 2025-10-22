@@ -228,8 +228,6 @@ func (q *BadgerQueue) fetchNextMessage(consumerID string) (*DeletionMessage, str
 				continue
 			}
 
-			messageKey = key
-
 			// Move to processing (atomic delete + insert)
 			// This prevents multiple workers from processing the same message
 			processingKey := q.getProcessingKey(key, consumerID)
@@ -246,6 +244,10 @@ func (q *BadgerQueue) fetchNextMessage(consumerID string) (*DeletionMessage, str
 			if err := txn.SetEntry(entry); err != nil {
 				return err
 			}
+
+			// Set messageKey to the processing key (not the original queue key)
+			// This is important for Ack/Nack/MoveToDLQ operations
+			messageKey = processingKey
 
 			logger.Debug("Message moved to processing",
 				zap.String("key", key),
@@ -274,22 +276,18 @@ func (q *BadgerQueue) getProcessingKey(queueKey, consumerID string) string {
 
 // Ack acknowledges successful processing
 func (q *BadgerQueue) Ack(ctx context.Context, messageID string) error {
-	// Delete from processing
-	processingPrefix := strings.Replace(messageID, q.queuePrefix, q.processingPrefix, 1)
+	// MessageID now contains the processing key directly
+	processingKey := messageID
 
 	err := q.db.Update(func(txn *badger.Txn) error {
-		// Find and delete the processing key (contains consumer ID suffix)
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false
-		iter := txn.NewIterator(opts)
-		defer iter.Close()
-
-		prefix := []byte(processingPrefix)
-		for iter.Seek(prefix); iter.ValidForPrefix(prefix); iter.Next() {
-			return txn.Delete(iter.Item().Key())
+		// Delete the processing key directly
+		if err := txn.Delete([]byte(processingKey)); err != nil {
+			if err != badger.ErrKeyNotFound {
+				return err
+			}
+			// If key not found, it's already processed (idempotent)
 		}
-
-		return nil // Already deleted or not found
+		return nil
 	})
 
 	if err != nil {
@@ -311,42 +309,34 @@ func (q *BadgerQueue) Ack(ctx context.Context, messageID string) error {
 
 // Nack rejects a message for retry
 func (q *BadgerQueue) Nack(ctx context.Context, messageID string, retryAfter time.Duration) error {
-	processingPrefix := strings.Replace(messageID, q.queuePrefix, q.processingPrefix, 1)
+	// MessageID now contains the processing key directly
+	processingKey := messageID
 
 	err := q.db.Update(func(txn *badger.Txn) error {
-		// Find message in processing
-		var msg *DeletionMessage
-		var processingKey []byte
-
-		opts := badger.DefaultIteratorOptions
-		iter := txn.NewIterator(opts)
-		defer iter.Close()
-
-		prefix := []byte(processingPrefix)
-		iter.Seek(prefix)
-		if iter.ValidForPrefix(prefix) {
-			item := iter.Item()
-			processingKey = item.KeyCopy(nil)
-
-			err := item.Value(func(val []byte) error {
-				var err error
-				msg, err = deserializeMessage(val)
-				return err
-			})
-			if err != nil {
-				return err
+		// Get message from processing
+		item, err := txn.Get([]byte(processingKey))
+		if err != nil {
+			if err == badger.ErrKeyNotFound {
+				return fmt.Errorf("message not found in processing")
 			}
+			return err
 		}
 
-		if msg == nil {
-			return fmt.Errorf("message not found in processing")
+		var msg *DeletionMessage
+		err = item.Value(func(val []byte) error {
+			var err error
+			msg, err = deserializeMessage(val)
+			return err
+		})
+		if err != nil {
+			return err
 		}
 
 		// Increment retry count
 		msg.RetryCount++
 
 		// Delete from processing
-		if err := txn.Delete(processingKey); err != nil {
+		if err := txn.Delete([]byte(processingKey)); err != nil {
 			return err
 		}
 
@@ -399,22 +389,26 @@ func (q *BadgerQueue) MoveToDLQ(ctx context.Context, msg *DeletionMessage, reaso
 			msg.IntentID)
 
 		entry := badger.NewEntry([]byte(dlqKey), data).WithTTL(7 * 24 * time.Hour) // 7 days
-		if err := txn.SetEntry(entry); err != nil {
-			return err
+		if setErr := txn.SetEntry(entry); setErr != nil {
+			logger.Error("Failed to add to DLQ",
+				zap.String("dlq_key", dlqKey),
+				zap.Error(setErr))
+			return setErr
 		}
 
 		// Delete from processing if exists
-		processingPrefix := strings.Replace(msg.MessageID, q.queuePrefix, q.processingPrefix, 1)
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false
-		iter := txn.NewIterator(opts)
-		defer iter.Close()
+		// MessageID now contains the processing key (with consumer ID suffix)
+		processingKey := msg.MessageID
 
-		prefix := []byte(processingPrefix)
-		iter.Seek(prefix)
-		if iter.ValidForPrefix(prefix) {
-			if err := txn.Delete(iter.Item().Key()); err != nil {
-				return fmt.Errorf("failed to delete processing entry: %w", err)
+		// Delete the processing key directly
+		delErr := txn.Delete([]byte(processingKey))
+		if delErr != nil {
+			// Key might not exist if already processed, which is fine
+			if delErr != badger.ErrKeyNotFound {
+				logger.Error("Failed to delete processing key in MoveToDLQ",
+					zap.String("processing_key", processingKey),
+					zap.Error(delErr))
+				return fmt.Errorf("failed to delete processing entry: %w", delErr)
 			}
 		}
 
@@ -492,11 +486,17 @@ func (q *BadgerQueue) GetStats(ctx context.Context) (*QueueStats, error) {
 		// Queue size and oldest message
 		prefix := []byte(q.queuePrefix)
 		for iter.Seek(prefix); iter.ValidForPrefix(prefix); iter.Next() {
+			key := string(iter.Item().Key())
+
+			// Skip processing and DLQ keys (they start with queuePrefix too)
+			if strings.Contains(key, ":processing:") || strings.Contains(key, ":dlq:") {
+				continue
+			}
+
 			queueSize++
 
 			if queueSize == 1 {
 				// Extract timestamp from first key
-				key := string(iter.Item().Key())
 				parts := strings.Split(strings.TrimPrefix(key, q.queuePrefix), ":")
 				if len(parts) > 0 {
 					if ts, err := strconv.ParseInt(parts[0], 10, 64); err == nil {

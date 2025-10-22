@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -192,82 +190,43 @@ func (s *S3Storage) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-// DeleteFolder removes all files in a folder recursively using custom S3 API
+// DeleteFolder removes a folder from S3 ONLY if it's empty
 func (s *S3Storage) DeleteFolder(ctx context.Context, prefix string) error {
-	logger.DebugWithContext(ctx, "Deleting folder from S3",
+	logger.DebugWithContext(ctx, "Attempting to delete folder from S3",
 		zap.String("prefix", prefix))
 
-	// Ensure prefix ends with / for folder deletion
+	// Ensure prefix ends with / for folder operations
 	if !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
 
-	// Extract base endpoint from S3 endpoint
-	baseEndpoint := strings.TrimSuffix(s.config.Endpoint, "/")
-	baseEndpoint = strings.TrimSuffix(baseEndpoint, "/s3")
-
-	// Build custom API URL for recursive folder deletion
-	// Format: https://s3.site/api/v1/buckets/{bucket}/objects?prefix={prefix}&recursive=true
-	deleteURL := fmt.Sprintf("%s/api/v1/buckets/%s/objects", baseEndpoint, s.bucket)
-
-	// Add query parameters
-	params := url.Values{}
-	params.Add("prefix", prefix)
-	params.Add("all_versions", "false")
-	params.Add("bypass", "false")
-	params.Add("recursive", "true")
-
-	fullURL := fmt.Sprintf("%s?%s", deleteURL, params.Encode())
-
-	logger.DebugWithContext(ctx, "Making DELETE request to custom S3 API",
-		zap.String("url", fullURL))
-
-	// Create HTTP DELETE request
-	req, err := http.NewRequestWithContext(ctx, "DELETE", fullURL, nil)
+	// First, check if folder is empty by listing its contents
+	listOutput, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket:  aws.String(s.bucket),
+		Prefix:  aws.String(prefix),
+		MaxKeys: aws.Int32(1), // We only need to know if there's at least one file
+	})
 	if err != nil {
-		logger.ErrorWithContext(ctx, "Failed to create DELETE request",
+		logger.ErrorWithContext(ctx, "Failed to list folder contents",
 			zap.String("prefix", prefix),
 			zap.Error(err))
-		return fmt.Errorf("failed to create delete request: %w", err)
+		return fmt.Errorf("failed to check folder contents: %w", err)
 	}
 
-	// Add authentication headers if needed
-	// For MinIO Console API, we might need different auth
-	req.Header.Set("Content-Type", "application/json")
-
-	// Execute the request
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		logger.ErrorWithContext(ctx, "Failed to execute folder delete request",
+	// Check if any objects exist in the folder
+	if len(listOutput.Contents) > 0 {
+		// Found at least one object - folder is not empty
+		logger.DebugWithContext(ctx, "Folder not empty, skipping deletion",
 			zap.String("prefix", prefix),
-			zap.Error(err))
-		return fmt.Errorf("failed to delete folder: %w", err)
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			// Log the error but don't return it as it's a cleanup operation
-			logger.Warn("Failed to close response body", zap.Error(err))
-		}
-	}()
-
-	// Read response body for debugging
-	body, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		logger.ErrorWithContext(ctx, "Folder delete request failed",
-			zap.String("prefix", prefix),
-			zap.Int("status_code", resp.StatusCode),
-			zap.String("response", string(body)))
-		return fmt.Errorf("folder delete failed with status %d: %s", resp.StatusCode, string(body))
+			zap.Int("file_count", len(listOutput.Contents)))
+		return fmt.Errorf("folder not empty: contains %d files", len(listOutput.Contents))
 	}
 
-	logger.InfoWithContext(ctx, "Folder deleted from S3 successfully",
-		zap.String("prefix", prefix),
-		zap.Int("status_code", resp.StatusCode))
+	// Folder is empty - we can delete it
+	// Note: In S3, folders don't really exist as objects unless explicitly created
+	// So we just need to verify it's empty, which we did above
+	logger.DebugWithContext(ctx, "Folder is empty, deletion successful",
+		zap.String("prefix", prefix))
 
 	return nil
 }
