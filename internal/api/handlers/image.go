@@ -581,25 +581,29 @@ func (h *ImageHandler) Delete(c *gin.Context) {
 
 	// Delete image
 	if err := h.imageService.DeleteImage(c.Request.Context(), imageID); err != nil {
-		logger.ErrorWithContext(c.Request.Context(), "Failed to delete image",
-			zap.String("image_id", imageID),
-			zap.Error(err))
-
 		// Handle different error types
 		switch err.(type) {
 		case models.NotFoundError:
+			logger.InfoWithContext(c.Request.Context(), "Image not found",
+				zap.String("image_id", imageID))
 			c.JSON(http.StatusNotFound, models.ErrorResponse{
 				Error:   "image_not_found",
 				Message: fmt.Sprintf("Image with ID %s not found", imageID),
 				Code:    http.StatusNotFound,
 			})
 		case models.ValidationError:
+			logger.WarnWithContext(c.Request.Context(), "Invalid image deletion request",
+				zap.String("image_id", imageID),
+				zap.Error(err))
 			c.JSON(http.StatusBadRequest, models.ErrorResponse{
 				Error:   "validation_error",
 				Message: err.Error(),
 				Code:    http.StatusBadRequest,
 			})
 		default:
+			logger.ErrorWithContext(c.Request.Context(), "Failed to delete image",
+				zap.String("image_id", imageID),
+				zap.Error(err))
 			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 				Error:   "delete_failed",
 				Message: "Failed to delete image",
@@ -649,26 +653,32 @@ func (h *ImageHandler) DeleteResolution(c *gin.Context) {
 
 	// Delete resolution
 	if err := h.imageService.DeleteResolution(c.Request.Context(), imageID, resolution); err != nil {
-		logger.ErrorWithContext(c.Request.Context(), "Failed to delete resolution",
-			zap.String("image_id", imageID),
-			zap.String("resolution", resolution),
-			zap.Error(err))
-
 		// Handle different error types
 		switch err.(type) {
 		case models.NotFoundError:
+			logger.InfoWithContext(c.Request.Context(), "Resolution not found",
+				zap.String("image_id", imageID),
+				zap.String("resolution", resolution))
 			c.JSON(http.StatusNotFound, models.ErrorResponse{
 				Error:   "resolution_not_found",
 				Message: fmt.Sprintf("Resolution %s not found for image %s", resolution, imageID),
 				Code:    http.StatusNotFound,
 			})
 		case models.ValidationError:
+			logger.WarnWithContext(c.Request.Context(), "Invalid resolution deletion request",
+				zap.String("image_id", imageID),
+				zap.String("resolution", resolution),
+				zap.Error(err))
 			c.JSON(http.StatusBadRequest, models.ErrorResponse{
 				Error:   "validation_error",
 				Message: err.Error(),
 				Code:    http.StatusBadRequest,
 			})
 		default:
+			logger.ErrorWithContext(c.Request.Context(), "Failed to delete resolution",
+				zap.String("image_id", imageID),
+				zap.String("resolution", resolution),
+				zap.Error(err))
 			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 				Error:   "delete_failed",
 				Message: "Failed to delete resolution",

@@ -183,6 +183,22 @@ func (m *MockDeduplicationRepository) GetStorageSavedByDeduplication(ctx context
 	return args.Get(0).(int64), args.Error(1)
 }
 
+func (m *MockDeduplicationRepository) DecrementResolutionRefs(ctx context.Context, hash models.ImageHash, imageID string, resolutions []string) (map[string]*repository.ResolutionRefCount, error) {
+	result := make(map[string]*repository.ResolutionRefCount)
+	for _, res := range resolutions {
+		result[res] = &repository.ResolutionRefCount{
+			Count:          0,
+			ReferencingIDs: []string{},
+			ShouldDelete:   true,
+		}
+	}
+	return result, nil
+}
+
+func (m *MockDeduplicationRepository) AddResolutionRef(ctx context.Context, hash models.ImageHash, resolution, imageID string) error {
+	return nil
+}
+
 // MockImageStorage implements storage.ImageStorage for testing
 type MockImageStorage struct {
 	mock.Mock

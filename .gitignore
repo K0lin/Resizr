@@ -9,6 +9,7 @@
 *.test
 
 # Output of the go build or go run
+migrate.exe
 resizr
 resizr.exe
 
@@ -51,3 +52,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+
+# Build directory
+build/

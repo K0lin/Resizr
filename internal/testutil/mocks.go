@@ -483,3 +483,21 @@ func (m *MockDeduplicationRepository) GetUniqueHashCount(ctx context.Context) (i
 func (m *MockDeduplicationRepository) GetStorageSavedByDeduplication(ctx context.Context) (int64, error) {
 	return 0, nil
 }
+
+func (m *MockDeduplicationRepository) DecrementResolutionRefs(ctx context.Context, hash models.ImageHash, imageID string, resolutions []string) (map[string]*repository.ResolutionRefCount, error) {
+	// Default implementation: return empty reference counts (no deletion needed)
+	result := make(map[string]*repository.ResolutionRefCount)
+	for _, res := range resolutions {
+		result[res] = &repository.ResolutionRefCount{
+			Count:          0,
+			ReferencingIDs: []string{},
+			ShouldDelete:   true,
+		}
+	}
+	return result, nil
+}
+
+func (m *MockDeduplicationRepository) AddResolutionRef(ctx context.Context, hash models.ImageHash, resolution, imageID string) error {
+	// Default implementation: no-op
+	return nil
+}
